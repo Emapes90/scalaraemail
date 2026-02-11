@@ -1,0 +1,339 @@
+// Scalara Webmail — Prisma Schema
+// Production-ready database schema for email, calendar, contacts
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// USER & AUTH
+// ============================================
+
+model User {
+  id             String    @id @default(cuid())
+  email          String    @unique
+  name           String?
+  passwordHash   String    @map("password_hash")
+  avatar         String?
+  signature      String?   @db.Text
+  timezone       String    @default("UTC")
+  language       String    @default("en")
+  
+  // Mail server credentials (encrypted)
+  imapHost       String    @map("imap_host")
+  imapPort       Int       @default(993) @map("imap_port")
+  smtpHost       String    @map("smtp_host")
+  smtpPort       Int       @default(587) @map("smtp_port")
+  mailPassword   String    @map("mail_password") // Encrypted
+  
+  // Settings
+  emailsPerPage    Int     @default(50)   @map("emails_per_page")
+  theme            String  @default("dark")
+  notifications    Boolean @default(true)
+  autoRefresh      Int     @default(30)   @map("auto_refresh") // seconds
+  
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+  lastLoginAt    DateTime? @map("last_login_at")
+  
+  // Relations
+  folders        Folder[]
+  labels         Label[]
+  contacts       Contact[]
+  contactGroups  ContactGroup[]
+  calendarEvents CalendarEvent[]
+  calendars      Calendar[]
+  sessions       Session[]
+  filters        EmailFilter[]
+  
+  @@map("users")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique @map("session_token")
+  userId       String   @map("user_id")
+  expires      DateTime
+  ipAddress    String?  @map("ip_address")
+  userAgent    String?  @map("user_agent")
+  
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  createdAt    DateTime @default(now()) @map("created_at")
+  
+  @@map("sessions")
+}
+
+// ============================================
+// EMAIL
+// ============================================
+
+model Folder {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String
+  icon      String?
+  color     String?
+  type      FolderType @default(CUSTOM)
+  sortOrder Int      @default(0) @map("sort_order")
+  
+  userId    String   @map("user_id")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  emails    CachedEmail[]
+  
+  createdAt DateTime @default(now()) @map("created_at")
+  
+  @@unique([userId, slug])
+  @@map("folders")
+}
+
+enum FolderType {
+  INBOX
+  SENT
+  DRAFTS
+  TRASH
+  SPAM
+  STARRED
+  ARCHIVE
+  CUSTOM
+}
+
+model CachedEmail {
+  id          String    @id @default(cuid())
+  messageId   String    @map("message_id")
+  uid         Int?
+  
+  fromAddress String    @map("from_address")
+  fromName    String?   @map("from_name")
+  toAddresses String    @map("to_addresses") @db.Text // JSON array
+  ccAddresses String?   @map("cc_addresses") @db.Text
+  bccAddresses String?  @map("bcc_addresses") @db.Text
+  replyTo     String?   @map("reply_to")
+  
+  subject     String?
+  bodyText    String?   @map("body_text") @db.Text
+  bodyHtml    String?   @map("body_html") @db.Text
+  snippet     String?   @db.VarChar(300)
+  
+  isRead      Boolean   @default(false) @map("is_read")
+  isStarred   Boolean   @default(false) @map("is_starred")
+  isFlagged   Boolean   @default(false) @map("is_flagged")
+  hasAttachments Boolean @default(false) @map("has_attachments")
+  priority    Int       @default(3) // 1=highest, 5=lowest
+  size        Int?      // bytes
+  
+  folderId    String    @map("folder_id")
+  folder      Folder    @relation(fields: [folderId], references: [id], onDelete: Cascade)
+  
+  labels      EmailLabel[]
+  attachments Attachment[]
+  
+  sentAt      DateTime? @map("sent_at")
+  receivedAt  DateTime  @default(now()) @map("received_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  
+  @@index([folderId, receivedAt(sort: Desc)])
+  @@index([messageId])
+  @@index([isRead])
+  @@map("cached_emails")
+}
+
+model Attachment {
+  id          String  @id @default(cuid())
+  filename    String
+  contentType String  @map("content_type")
+  size        Int
+  contentId   String? @map("content_id")
+  path        String? // stored file path
+  
+  emailId     String  @map("email_id")
+  email       CachedEmail @relation(fields: [emailId], references: [id], onDelete: Cascade)
+  
+  @@map("attachments")
+}
+
+model Label {
+  id     String @id @default(cuid())
+  name   String
+  color  String @default("#ffffff")
+  
+  userId String @map("user_id")
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  emails EmailLabel[]
+  
+  @@unique([userId, name])
+  @@map("labels")
+}
+
+model EmailLabel {
+  emailId String @map("email_id")
+  labelId String @map("label_id")
+  
+  email   CachedEmail @relation(fields: [emailId], references: [id], onDelete: Cascade)
+  label   Label       @relation(fields: [labelId], references: [id], onDelete: Cascade)
+  
+  @@id([emailId, labelId])
+  @@map("email_labels")
+}
+
+model EmailFilter {
+  id        String   @id @default(cuid())
+  name      String
+  isActive  Boolean  @default(true) @map("is_active")
+  
+  // Conditions (JSON)
+  conditions String  @db.Text // JSON: { from, to, subject, contains, ... }
+  
+  // Actions
+  action     String  // move, label, star, markRead, delete, forward
+  actionValue String? @map("action_value")
+  
+  userId    String   @map("user_id")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  createdAt DateTime @default(now()) @map("created_at")
+  
+  @@map("email_filters")
+}
+
+// ============================================
+// CONTACTS
+// ============================================
+
+model Contact {
+  id          String   @id @default(cuid())
+  firstName   String?  @map("first_name")
+  lastName    String?  @map("last_name")
+  displayName String   @map("display_name")
+  
+  emails      ContactEmail[]
+  phones      ContactPhone[]
+  
+  company     String?
+  jobTitle    String?  @map("job_title")
+  website     String?
+  address     String?  @db.Text
+  notes       String?  @db.Text
+  avatar      String?
+  birthday    DateTime?
+  
+  isFavorite  Boolean  @default(false) @map("is_favorite")
+  
+  userId      String   @map("user_id")
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  groups      ContactGroupMember[]
+  
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  
+  @@index([userId, displayName])
+  @@map("contacts")
+}
+
+model ContactEmail {
+  id        String @id @default(cuid())
+  email     String
+  type      String @default("personal") // personal, work, other
+  isPrimary Boolean @default(false) @map("is_primary")
+  
+  contactId String @map("contact_id")
+  contact   Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  
+  @@map("contact_emails")
+}
+
+model ContactPhone {
+  id        String @id @default(cuid())
+  phone     String
+  type      String @default("mobile") // mobile, home, work, other
+  isPrimary Boolean @default(false) @map("is_primary")
+  
+  contactId String @map("contact_id")
+  contact   Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  
+  @@map("contact_phones")
+}
+
+model ContactGroup {
+  id       String @id @default(cuid())
+  name     String
+  color    String @default("#ffffff")
+  
+  userId   String @map("user_id")
+  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  members  ContactGroupMember[]
+  
+  createdAt DateTime @default(now()) @map("created_at")
+  
+  @@unique([userId, name])
+  @@map("contact_groups")
+}
+
+model ContactGroupMember {
+  contactId String @map("contact_id")
+  groupId   String @map("group_id")
+  
+  contact   Contact      @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  group     ContactGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  
+  @@id([contactId, groupId])
+  @@map("contact_group_members")
+}
+
+// ============================================
+// CALENDAR
+// ============================================
+
+model Calendar {
+  id       String @id @default(cuid())
+  name     String
+  color    String @default("#3b82f6")
+  isDefault Boolean @default(false) @map("is_default")
+  isVisible Boolean @default(true) @map("is_visible")
+  
+  userId   String @map("user_id")
+  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  events   CalendarEvent[]
+  
+  createdAt DateTime @default(now()) @map("created_at")
+  
+  @@map("calendars")
+}
+
+model CalendarEvent {
+  id          String   @id @default(cuid())
+  title       String
+  description String?  @db.Text
+  location    String?
+  
+  startTime   DateTime @map("start_time")
+  endTime     DateTime @map("end_time")
+  allDay      Boolean  @default(false) @map("all_day")
+  
+  color       String?
+  recurrence  String?  // RRULE string
+  
+  reminders   String?  @db.Text // JSON array of reminder configs
+  
+  calendarId  String   @map("calendar_id")
+  calendar    Calendar @relation(fields: [calendarId], references: [id], onDelete: Cascade)
+  
+  userId      String   @map("user_id")
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  
+  @@index([userId, startTime, endTime])
+  @@map("calendar_events")
+}

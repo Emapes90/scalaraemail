@@ -1,0 +1,127 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap");
+@layer base {
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+  html {
+    color-scheme: dark;
+  }
+  body {
+    @apply bg-scalara-bg text-white antialiased;
+    font-family:
+      "Inter",
+      system-ui,
+      -apple-system,
+      sans-serif;
+  }
+  ::selection {
+    @apply bg-white/20 text-white;
+  }
+}
+
+@layer components {
+  .custom-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: #333333 transparent;
+  }
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background-color: #333333;
+    border-radius: 3px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background-color: #444444;
+  }
+  /* Email HTML content styling */
+  .email-content {
+    @apply text-sm text-scalara-muted-foreground;
+  }
+  .email-content a {
+    @apply text-blue-400 underline hover: text-blue-300;
+  }
+  .email-content img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 8px;
+  }
+  .email-content blockquote {
+    @apply border-l-2 border-scalara-border pl-4 my-2 text-scalara-muted;
+  }
+  .email-content table {
+    @apply border-collapse w-full;
+  }
+  .email-content td,
+  .email-content th {
+    @apply border border-scalara-border p-2 text-sm;
+  }
+  .email-content pre,
+  .email-content code {
+    @apply bg-scalara-card rounded px-1.5 py-0.5 text-xs font-mono;
+  }
+  .email-content pre {
+    @apply p-3 overflow-x-auto;
+  }
+  .email-content h1 {
+    @apply text-xl font-bold mb-2 text-white;
+  }
+  .email-content h2 {
+    @apply text-lg font-semibold mb-2 text-white;
+  }
+  .email-content h3 {
+    @apply text-base font-medium mb-1 text-white;
+  }
+  .email-content p {
+    @apply mb-2;
+  }
+  .email-content ul,
+  .email-content ol {
+    @apply ml-5 mb-2;
+  }
+  .email-content ul {
+    list-style-type: disc;
+  }
+  .email-content ol {
+    list-style-type: decimal;
+  }
+  /* Compose editor */
+  .compose-editor {
+    @apply min-h-[200px] p-4 text-sm text-white bg-transparent;
+    @apply focus: outline-none;
+  }
+  .compose-editor:empty::before {
+    content: attr(data-placeholder);
+    @apply text-scalara-muted;
+  }
+  /* Transition classes */
+  .transition-base {
+    @apply transition-all duration-150 ease-out;
+  }
+  /* Glass effect */
+  .glass {
+    @apply bg-scalara-surface/80 backdrop-blur-xl border border-scalara-border;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+}
