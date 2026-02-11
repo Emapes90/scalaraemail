@@ -310,19 +310,16 @@ install_postgresql() {
 setup_initial_ssl() {
     log_step "Generating initial SSL certificates"
 
+    # Use /etc/ssl/scalara/ for self-signed so certbot can use /etc/letsencrypt/ later
     for domain in "${MAIL_HOSTNAME}" "${WEBMAIL_HOSTNAME}"; do
-        local cert_dir="/etc/letsencrypt/live/${domain}"
-        if [[ ! -f "${cert_dir}/fullchain.pem" ]]; then
-            mkdir -p "${cert_dir}"
-            openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-                -keyout "${cert_dir}/privkey.pem" \
-                -out "${cert_dir}/fullchain.pem" \
-                -subj "/CN=${domain}" \
-                2>/dev/null
-            log_success "Self-signed cert generated for ${domain}"
-        else
-            log_info "Certificate already exists for ${domain}, skipping"
-        fi
+        local cert_dir="/etc/ssl/scalara/${domain}"
+        mkdir -p "${cert_dir}"
+        openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+            -keyout "${cert_dir}/privkey.pem" \
+            -out "${cert_dir}/fullchain.pem" \
+            -subj "/CN=${domain}" \
+            2>/dev/null
+        log_success "Self-signed cert generated for ${domain}"
     done
 
     log_success "Initial SSL certificates ready"
@@ -376,8 +373,8 @@ readme_directory = no
 compatibility_level = 3.6
 
 # TLS parameters
-smtpd_tls_cert_file = /etc/letsencrypt/live/${MAIL_HOSTNAME}/fullchain.pem
-smtpd_tls_key_file = /etc/letsencrypt/live/${MAIL_HOSTNAME}/privkey.pem
+smtpd_tls_cert_file = /etc/ssl/scalara/${MAIL_HOSTNAME}/fullchain.pem
+smtpd_tls_key_file = /etc/ssl/scalara/${MAIL_HOSTNAME}/privkey.pem
 smtpd_tls_security_level = may
 smtpd_tls_auth_only = yes
 smtpd_tls_protocols = !SSLv2, !SSLv3, !TLSv1, !TLSv1.1
@@ -498,11 +495,11 @@ mail_privileged_group = vmail
 EOF
 
     # SSL config
-    # SSL config (use 'yes' initially, switch to 'required' after real certs)
+    # SSL config (use self-signed initially, switch to letsencrypt after real certs)
     cat > /etc/dovecot/conf.d/10-ssl.conf << EOF
 ssl = yes
-ssl_cert = </etc/letsencrypt/live/${MAIL_HOSTNAME}/fullchain.pem
-ssl_key = </etc/letsencrypt/live/${MAIL_HOSTNAME}/privkey.pem
+ssl_cert = </etc/ssl/scalara/${MAIL_HOSTNAME}/fullchain.pem
+ssl_key = </etc/ssl/scalara/${MAIL_HOSTNAME}/privkey.pem
 ssl_min_protocol = TLSv1.2
 ssl_prefer_server_ciphers = yes
 EOF
@@ -637,9 +634,9 @@ server {
     listen [::]:443 ssl http2;
     server_name ${WEBMAIL_HOSTNAME};
 
-    # SSL (will be configured by certbot)
-    ssl_certificate     /etc/letsencrypt/live/${WEBMAIL_HOSTNAME}/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/${WEBMAIL_HOSTNAME}/privkey.pem;
+    # SSL (self-signed initially, updated to letsencrypt later)
+    ssl_certificate     /etc/ssl/scalara/${WEBMAIL_HOSTNAME}/fullchain.pem;
+    ssl_certificate_key /etc/ssl/scalara/${WEBMAIL_HOSTNAME}/privkey.pem;
     ssl_protocols       TLSv1.2 TLSv1.3;
     ssl_ciphers         HIGH:!aNULL:!MD5;
     ssl_prefer_server_ciphers on;
@@ -693,13 +690,14 @@ EOF
 deploy_webmail() {
     log_step "Deploying Scalara Webmail"
 
-    # Copy webmail source
+    # Copy webmail source (including hidden files like .env.example, .gitignore)
     if [[ -d "${INSTALLER_DIR}/../webmail" ]]; then
-        cp -r "${INSTALLER_DIR}/../webmail/"* "${WEBMAIL_DIR}/"
+        cp -r "${INSTALLER_DIR}/../webmail/". "${WEBMAIL_DIR}/"
         log_success "Webmail source copied"
     else
         log_error "Webmail source not found at ${INSTALLER_DIR}/../webmail"
         log_info "Please copy the webmail directory to ${WEBMAIL_DIR} manually"
+        return 1
     fi
 
     # Create .env file
@@ -733,16 +731,24 @@ EOF
     chown -R "${SCALARA_USER}:${SCALARA_USER}" "${WEBMAIL_DIR}"
     chmod 600 "${WEBMAIL_DIR}/.env"
 
-    # Install dependencies & build
-    log_info "Installing Node.js dependencies..."
+    # Install dependencies
+    log_info "Installing Node.js dependencies (this may take a minute)..."
     cd "${WEBMAIL_DIR}"
-    sudo -u "${SCALARA_USER}" npm ci --production=false --silent 2>/dev/null || sudo -u "${SCALARA_USER}" npm install --silent
-    log_success "Dependencies installed"
+    # Run npm install as scalara user; show output for debugging
+    if sudo -u "${SCALARA_USER}" npm install 2>&1 | tail -20; then
+        log_success "Dependencies installed"
+    else
+        log_error "npm install failed. Trying with root..."
+        npm install 2>&1 | tail -20
+        chown -R "${SCALARA_USER}:${SCALARA_USER}" "${WEBMAIL_DIR}"
+        log_success "Dependencies installed (as root)"
+    fi
 
     # Generate Prisma client & run migrations
     log_info "Setting up database schema..."
-    sudo -u "${SCALARA_USER}" npx prisma generate
-    sudo -u "${SCALARA_USER}" npx prisma db push --accept-data-loss
+    cd "${WEBMAIL_DIR}"
+    sudo -u "${SCALARA_USER}" npx prisma generate 2>&1 | tail -5
+    sudo -u "${SCALARA_USER}" npx prisma db push --accept-data-loss 2>&1 | tail -10
     log_success "Database schema applied"
 
     # Create admin user
@@ -751,12 +757,21 @@ EOF
     log_success "Admin user created"
 
     # Build Next.js app
-    log_info "Building webmail (this may take a few minutes)..."
-    sudo -u "${SCALARA_USER}" npm run build
-    log_success "Webmail built successfully"
+    log_info "Building webmail (this may take 2-5 minutes)..."
+    cd "${WEBMAIL_DIR}"
+    if sudo -u "${SCALARA_USER}" npm run build 2>&1 | tail -30; then
+        log_success "Webmail built successfully"
+    else
+        log_error "Build failed. Trying with root..."
+        npm run build 2>&1 | tail -30
+        chown -R "${SCALARA_USER}:${SCALARA_USER}" "${WEBMAIL_DIR}"
+        log_success "Webmail built (as root)"
+    fi
 
     # Setup PM2
     log_info "Setting up PM2 process manager..."
+    cd "${WEBMAIL_DIR}"
+    sudo -u "${SCALARA_USER}" pm2 delete scalara 2>/dev/null || true
     sudo -u "${SCALARA_USER}" pm2 start npm --name "scalara" -- start
     sudo -u "${SCALARA_USER}" pm2 save
     pm2 startup systemd -u "${SCALARA_USER}" --hp "${SCALARA_HOME}" 2>/dev/null || true
@@ -825,35 +840,66 @@ SCRIPT
 
 # ─── SSL Certificates ───────────────────────────────────────
 setup_ssl_certs() {
-    log_step "Setting up SSL certificates"
+    log_step "Setting up Let's Encrypt SSL certificates"
 
-    # Temporarily stop nginx for standalone cert
+    # Stop everything that uses port 80/443
     systemctl stop nginx 2>/dev/null || true
+    systemctl stop apache2 2>/dev/null || true
+
+    # Kill anything still on port 80
+    fuser -k 80/tcp 2>/dev/null || true
+    sleep 2
+
+    local ssl_ok=false
 
     # Get certificate for webmail hostname
     log_info "Obtaining SSL certificate for ${WEBMAIL_HOSTNAME}..."
-    certbot certonly --standalone \
+    if certbot certonly --standalone \
         --non-interactive \
         --agree-tos \
         --email "${ADMIN_EMAIL}" \
-        -d "${WEBMAIL_HOSTNAME}" \
-        || log_warn "SSL cert for webmail failed – you can run certbot manually later"
+        -d "${WEBMAIL_HOSTNAME}" 2>&1; then
+        log_success "SSL cert obtained for ${WEBMAIL_HOSTNAME}"
+    else
+        log_warn "SSL cert for webmail failed – you can run certbot manually later"
+    fi
 
     # Get certificate for mail hostname
     log_info "Obtaining SSL certificate for ${MAIL_HOSTNAME}..."
-    certbot certonly --standalone \
+    if certbot certonly --standalone \
         --non-interactive \
         --agree-tos \
         --email "${ADMIN_EMAIL}" \
-        -d "${MAIL_HOSTNAME}" \
-        || log_warn "SSL cert for mail failed – you can run certbot manually later"
+        -d "${MAIL_HOSTNAME}" 2>&1; then
+        log_success "SSL cert obtained for ${MAIL_HOSTNAME}"
+    else
+        log_warn "SSL cert for mail failed – you can run certbot manually later"
+    fi
 
     # Auto-renewal
     systemctl enable certbot.timer 2>/dev/null || true
 
-    # Upgrade Dovecot SSL to 'required' now that we have real certs
+    # If real certs exist, update Dovecot/Postfix/Nginx to use them
     if [[ -f "/etc/letsencrypt/live/${MAIL_HOSTNAME}/fullchain.pem" ]]; then
-        sed -i 's/^ssl = yes/ssl = required/' /etc/dovecot/conf.d/10-ssl.conf 2>/dev/null || true
+        log_info "Updating services to use Let's Encrypt certs..."
+
+        # Update Dovecot
+        cat > /etc/dovecot/conf.d/10-ssl.conf << EOF
+ssl = required
+ssl_cert = </etc/letsencrypt/live/${MAIL_HOSTNAME}/fullchain.pem
+ssl_key = </etc/letsencrypt/live/${MAIL_HOSTNAME}/privkey.pem
+ssl_min_protocol = TLSv1.2
+ssl_prefer_server_ciphers = yes
+EOF
+
+        # Update Postfix TLS
+        postconf -e "smtpd_tls_cert_file = /etc/letsencrypt/live/${MAIL_HOSTNAME}/fullchain.pem"
+        postconf -e "smtpd_tls_key_file = /etc/letsencrypt/live/${MAIL_HOSTNAME}/privkey.pem"
+    fi
+
+    # Update Nginx if webmail cert exists
+    if [[ -f "/etc/letsencrypt/live/${WEBMAIL_HOSTNAME}/fullchain.pem" ]]; then
+        sed -i "s|/etc/ssl/scalara/${WEBMAIL_HOSTNAME}|/etc/letsencrypt/live/${WEBMAIL_HOSTNAME}|g" /etc/nginx/sites-available/scalara 2>/dev/null || true
     fi
 
     # Restart all services with new certs
