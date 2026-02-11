@@ -338,7 +338,7 @@ EOF
     postmap /etc/postfix/virtual_mailbox_domains 2>/dev/null || true
 
     systemctl enable postfix
-    systemctl restart postfix
+    systemctl restart postfix 2>/dev/null || log_warn "Postfix will be restarted after SSL certs"
     log_success "Postfix installed and configured"
 }
 
@@ -476,8 +476,9 @@ mail_privileged_group = vmail
 EOF
 
     # SSL config
+    # SSL config (use 'yes' initially, switch to 'required' after real certs)
     cat > /etc/dovecot/conf.d/10-ssl.conf << EOF
-ssl = required
+ssl = yes
 ssl_cert = </etc/letsencrypt/live/${MAIL_HOSTNAME}/fullchain.pem
 ssl_key = </etc/letsencrypt/live/${MAIL_HOSTNAME}/privkey.pem
 ssl_min_protocol = TLSv1.2
@@ -533,8 +534,11 @@ EOF
     chmod -R o-rwx /etc/dovecot
 
     systemctl enable dovecot
-    systemctl restart dovecot
-    log_success "Dovecot installed and configured"
+    if systemctl restart dovecot 2>/dev/null; then
+        log_success "Dovecot installed and configured"
+    else
+        log_warn "Dovecot installed but failed to start – will retry after SSL certs"
+    fi
 }
 
 configure_dovecot_inline() {
@@ -581,10 +585,14 @@ install_nginx() {
     rm -f /etc/nginx/sites-enabled/default
 
     # Test config
-    nginx -t
-    systemctl enable nginx
-    systemctl restart nginx
-    log_success "Nginx installed and configured"
+    if nginx -t 2>/dev/null; then
+        systemctl enable nginx
+        systemctl restart nginx
+        log_success "Nginx installed and configured"
+    else
+        log_warn "Nginx config test failed – will retry after SSL certs are obtained"
+        systemctl enable nginx
+    fi
 }
 
 configure_nginx_inline() {
@@ -821,8 +829,16 @@ setup_ssl_certs() {
     # Auto-renewal
     systemctl enable certbot.timer 2>/dev/null || true
 
-    # Restart nginx
-    systemctl start nginx
+    # Upgrade Dovecot SSL to 'required' now that we have real certs
+    if [[ -f "/etc/letsencrypt/live/${MAIL_HOSTNAME}/fullchain.pem" ]]; then
+        sed -i 's/^ssl = yes/ssl = required/' /etc/dovecot/conf.d/10-ssl.conf 2>/dev/null || true
+    fi
+
+    # Restart all services with new certs
+    log_info "Restarting services with SSL certificates..."
+    systemctl restart postfix 2>/dev/null || true
+    systemctl restart dovecot 2>/dev/null || true
+    systemctl start nginx 2>/dev/null || true
 
     log_success "SSL certificates configured"
 }
@@ -1049,6 +1065,7 @@ main() {
     setup_firewall
     setup_fail2ban
     install_postgresql
+    setup_initial_ssl
     install_postfix
     install_dovecot
     install_nodejs
