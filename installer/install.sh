@@ -306,6 +306,28 @@ install_postgresql() {
     log_success "PostgreSQL installed – DB: scalara, User: scalara"
 }
 
+# ─── Initial Self-Signed SSL ─────────────────────────────────
+setup_initial_ssl() {
+    log_step "Generating initial SSL certificates"
+
+    for domain in "${MAIL_HOSTNAME}" "${WEBMAIL_HOSTNAME}"; do
+        local cert_dir="/etc/letsencrypt/live/${domain}"
+        if [[ ! -f "${cert_dir}/fullchain.pem" ]]; then
+            mkdir -p "${cert_dir}"
+            openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+                -keyout "${cert_dir}/privkey.pem" \
+                -out "${cert_dir}/fullchain.pem" \
+                -subj "/CN=${domain}" \
+                2>/dev/null
+            log_success "Self-signed cert generated for ${domain}"
+        else
+            log_info "Certificate already exists for ${domain}, skipping"
+        fi
+    done
+
+    log_success "Initial SSL certificates ready"
+}
+
 # ─── Postfix ─────────────────────────────────────────────────
 install_postfix() {
     log_step "Installing Postfix"
