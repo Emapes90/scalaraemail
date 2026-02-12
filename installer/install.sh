@@ -298,8 +298,9 @@ install_postgresql() {
     systemctl enable postgresql
     systemctl start postgresql
 
-    # Create database and user
+    # Create database and user (ALTER ensures password is correct on re-runs)
     sudo -u postgres psql -c "CREATE USER scalara WITH PASSWORD '${DB_PASSWORD}';" 2>/dev/null || true
+    sudo -u postgres psql -c "ALTER USER scalara WITH PASSWORD '${DB_PASSWORD}';" 2>/dev/null || true
     sudo -u postgres psql -c "CREATE DATABASE scalara OWNER scalara;" 2>/dev/null || true
     sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE scalara TO scalara;" 2>/dev/null || true
 
