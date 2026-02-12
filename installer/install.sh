@@ -835,7 +835,9 @@ main()
     .finally(() => prisma.\$disconnect());
 SCRIPT
 
-    sudo -u "${SCALARA_USER}" node /tmp/scalara-create-admin.js
+    # Run from webmail dir so node can find node_modules
+    cd "${WEBMAIL_DIR}"
+    NODE_PATH="${WEBMAIL_DIR}/node_modules" node /tmp/scalara-create-admin.js
     rm -f /tmp/scalara-create-admin.js
 }
 
