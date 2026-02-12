@@ -23,7 +23,7 @@
     "next-auth": "^4.24.11",
     "bcryptjs": "^2.4.3",
     "imapflow": "^1.0.171",
-    "nodemailer": "^6.9.16",
+    "nodemailer": "^7.0.7",
     "mailparser": "^3.7.1",
     "zustand": "^5.0.2",
     "lucide-react": "^0.468.0",

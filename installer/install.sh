@@ -734,12 +734,12 @@ EOF
     # Install dependencies
     log_info "Installing Node.js dependencies (this may take a minute)..."
     cd "${WEBMAIL_DIR}"
-    # Run npm install as scalara user; show output for debugging
-    if sudo -u "${SCALARA_USER}" npm install 2>&1 | tail -20; then
+    # Run npm install as scalara user with legacy-peer-deps for compatibility
+    if sudo -u "${SCALARA_USER}" npm install --legacy-peer-deps 2>&1 | tail -20; then
         log_success "Dependencies installed"
     else
         log_error "npm install failed. Trying with root..."
-        npm install 2>&1 | tail -20
+        npm install --legacy-peer-deps 2>&1 | tail -20
         chown -R "${SCALARA_USER}:${SCALARA_USER}" "${WEBMAIL_DIR}"
         log_success "Dependencies installed (as root)"
     fi
@@ -850,7 +850,14 @@ setup_ssl_certs() {
     fuser -k 80/tcp 2>/dev/null || true
     sleep 2
 
-    local ssl_ok=false
+    # Clean up any old/stale Let's Encrypt directories to avoid -0001 suffix issues
+    log_info "Cleaning old Let's Encrypt directories..."
+    for domain in "${MAIL_HOSTNAME}" "${WEBMAIL_HOSTNAME}"; do
+        # Remove all variants (base, -0001, -0002, etc.)
+        rm -rf /etc/letsencrypt/live/${domain}* 2>/dev/null || true
+        rm -rf /etc/letsencrypt/archive/${domain}* 2>/dev/null || true
+        rm -f /etc/letsencrypt/renewal/${domain}*.conf 2>/dev/null || true
+    done
 
     # Get certificate for webmail hostname
     log_info "Obtaining SSL certificate for ${WEBMAIL_HOSTNAME}..."
@@ -858,7 +865,8 @@ setup_ssl_certs() {
         --non-interactive \
         --agree-tos \
         --email "${ADMIN_EMAIL}" \
-        -d "${WEBMAIL_HOSTNAME}" 2>&1; then
+        -d "${WEBMAIL_HOSTNAME}" \
+        --force-renewal 2>&1; then
         log_success "SSL cert obtained for ${WEBMAIL_HOSTNAME}"
     else
         log_warn "SSL cert for webmail failed – you can run certbot manually later"
@@ -870,7 +878,8 @@ setup_ssl_certs() {
         --non-interactive \
         --agree-tos \
         --email "${ADMIN_EMAIL}" \
-        -d "${MAIL_HOSTNAME}" 2>&1; then
+        -d "${MAIL_HOSTNAME}" \
+        --force-renewal 2>&1; then
         log_success "SSL cert obtained for ${MAIL_HOSTNAME}"
     else
         log_warn "SSL cert for mail failed – you can run certbot manually later"
@@ -879,27 +888,48 @@ setup_ssl_certs() {
     # Auto-renewal
     systemctl enable certbot.timer 2>/dev/null || true
 
-    # If real certs exist, update Dovecot/Postfix/Nginx to use them
-    if [[ -f "/etc/letsencrypt/live/${MAIL_HOSTNAME}/fullchain.pem" ]]; then
-        log_info "Updating services to use Let's Encrypt certs..."
+    # Find the actual cert directory (handles -0001 suffix from previous runs)
+    local MAIL_CERT_DIR=""
+    local WEBMAIL_CERT_DIR=""
+
+    # Check base name first, then -0001, -0002, etc.
+    for suffix in "" "-0001" "-0002" "-0003"; do
+        if [[ -f "/etc/letsencrypt/live/${MAIL_HOSTNAME}${suffix}/fullchain.pem" ]]; then
+            MAIL_CERT_DIR="/etc/letsencrypt/live/${MAIL_HOSTNAME}${suffix}"
+            break
+        fi
+    done
+    for suffix in "" "-0001" "-0002" "-0003"; do
+        if [[ -f "/etc/letsencrypt/live/${WEBMAIL_HOSTNAME}${suffix}/fullchain.pem" ]]; then
+            WEBMAIL_CERT_DIR="/etc/letsencrypt/live/${WEBMAIL_HOSTNAME}${suffix}"
+            break
+        fi
+    done
+
+    log_info "Mail cert dir: ${MAIL_CERT_DIR:-NOT FOUND}"
+    log_info "Webmail cert dir: ${WEBMAIL_CERT_DIR:-NOT FOUND}"
+
+    # If real certs exist, update Dovecot/Postfix to use them
+    if [[ -n "${MAIL_CERT_DIR}" ]]; then
+        log_info "Updating mail services to use Let's Encrypt certs..."
 
         # Update Dovecot
         cat > /etc/dovecot/conf.d/10-ssl.conf << EOF
 ssl = required
-ssl_cert = </etc/letsencrypt/live/${MAIL_HOSTNAME}/fullchain.pem
-ssl_key = </etc/letsencrypt/live/${MAIL_HOSTNAME}/privkey.pem
+ssl_cert = <${MAIL_CERT_DIR}/fullchain.pem
+ssl_key = <${MAIL_CERT_DIR}/privkey.pem
 ssl_min_protocol = TLSv1.2
 ssl_prefer_server_ciphers = yes
 EOF
 
         # Update Postfix TLS
-        postconf -e "smtpd_tls_cert_file = /etc/letsencrypt/live/${MAIL_HOSTNAME}/fullchain.pem"
-        postconf -e "smtpd_tls_key_file = /etc/letsencrypt/live/${MAIL_HOSTNAME}/privkey.pem"
+        postconf -e "smtpd_tls_cert_file = ${MAIL_CERT_DIR}/fullchain.pem"
+        postconf -e "smtpd_tls_key_file = ${MAIL_CERT_DIR}/privkey.pem"
     fi
 
     # Update Nginx if webmail cert exists
-    if [[ -f "/etc/letsencrypt/live/${WEBMAIL_HOSTNAME}/fullchain.pem" ]]; then
-        sed -i "s|/etc/ssl/scalara/${WEBMAIL_HOSTNAME}|/etc/letsencrypt/live/${WEBMAIL_HOSTNAME}|g" /etc/nginx/sites-available/scalara 2>/dev/null || true
+    if [[ -n "${WEBMAIL_CERT_DIR}" ]]; then
+        sed -i "s|/etc/ssl/scalara/${WEBMAIL_HOSTNAME}|${WEBMAIL_CERT_DIR}|g" /etc/nginx/sites-available/scalara 2>/dev/null || true
     fi
 
     # Restart all services with new certs
