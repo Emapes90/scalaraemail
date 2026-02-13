@@ -3,7 +3,13 @@ import CredentialsProvider from "next-auth/providers/credentials";
 import { prisma } from "@/lib/db";
 import { verifyPassword } from "@/lib/crypto";
 
+const useSecureCookies = process.env.NEXTAUTH_URL?.startsWith("https://");
+const hostName = process.env.NEXTAUTH_URL
+  ? new URL(process.env.NEXTAUTH_URL).hostname
+  : undefined;
+
 export const authOptions: NextAuthOptions = {
+  debug: process.env.NODE_ENV !== "production",
   providers: [
     CredentialsProvider({
       name: "Scalara",
@@ -96,6 +102,24 @@ export const authOptions: NextAuthOptions = {
         (session.user as any).id = token.id;
       }
       return session;
+    },
+  },
+  cookies: {
+    sessionToken: {
+      name: useSecureCookies
+        ? "__Secure-next-auth.session-token"
+        : "next-auth.session-token",
+      options: {
+        httpOnly: true,
+        sameSite: "lax",
+        path: "/",
+        secure: useSecureCookies,
+        domain: hostName
+          ? hostName.startsWith(".")
+            ? hostName
+            : undefined
+          : undefined,
+      },
     },
   },
   secret: process.env.NEXTAUTH_SECRET,
