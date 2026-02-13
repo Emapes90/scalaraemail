@@ -3,10 +3,10 @@ import CredentialsProvider from "next-auth/providers/credentials";
 import { prisma } from "@/lib/db";
 import { verifyPassword } from "@/lib/crypto";
 
-const useSecureCookies = process.env.NEXTAUTH_URL?.startsWith("https://");
-const hostName = process.env.NEXTAUTH_URL
-  ? new URL(process.env.NEXTAUTH_URL).hostname
-  : undefined;
+const rawUrl = process.env.NEXTAUTH_URL || "";
+const fullUrl = rawUrl.startsWith("http") ? rawUrl : `https://${rawUrl}`;
+const useSecureCookies = fullUrl.startsWith("https://");
+const hostName = rawUrl ? new URL(fullUrl).hostname : undefined;
 
 export const authOptions: NextAuthOptions = {
   debug: process.env.NODE_ENV !== "production",
