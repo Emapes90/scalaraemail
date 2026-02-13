@@ -14,7 +14,6 @@ export default function StarredPage() {
     emails,
     setEmails,
     setActiveFolder,
-    updateEmail,
     removeEmails,
     isLoading,
     setLoading,
@@ -45,7 +44,8 @@ export default function StarredPage() {
   const handleEmailClick = async (email: Email) => {
     setViewingEmail(email);
     try {
-      const res = await fetch(`/api/emails/${email.uid}?folder=inbox`);
+      // Starred emails could be from any folder, try INBOX first
+      const res = await fetch(`/api/emails/${email.uid}?folder=starred`);
       const data = await res.json();
       if (data.success) setViewingEmail({ ...email, ...data.data });
     } catch (e) {
@@ -62,7 +62,7 @@ export default function StarredPage() {
       await fetch(`/api/emails/${uid}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, folder: "inbox" }),
+        body: JSON.stringify({ action, folder: "starred" }),
       });
       if (action === "unstar") {
         removeEmails([String(uid)]);
@@ -77,6 +77,47 @@ export default function StarredPage() {
     }
   };
 
+  const handleReply = () => {
+    if (!viewingEmail) return;
+    const originalText = viewingEmail.bodyText || "";
+    const quotedBody = `\n\n\nOn ${new Date(viewingEmail.sentAt || viewingEmail.receivedAt).toLocaleString()}, ${viewingEmail.fromName || viewingEmail.fromAddress} wrote:\n> ${originalText.split("\n").join("\n> ")}`;
+    setComposing(true, {
+      to: [viewingEmail.fromAddress],
+      subject: viewingEmail.subject?.startsWith("Re:")
+        ? viewingEmail.subject
+        : `Re: ${viewingEmail.subject}`,
+      body: quotedBody,
+      inReplyTo: viewingEmail.messageId,
+    });
+  };
+
+  const handleReplyAll = () => {
+    if (!viewingEmail) return;
+    const originalText = viewingEmail.bodyText || "";
+    const quotedBody = `\n\n\nOn ${new Date(viewingEmail.sentAt || viewingEmail.receivedAt).toLocaleString()}, ${viewingEmail.fromName || viewingEmail.fromAddress} wrote:\n> ${originalText.split("\n").join("\n> ")}`;
+    setComposing(true, {
+      to: [viewingEmail.fromAddress, ...(viewingEmail.toAddresses || [])],
+      cc: viewingEmail.ccAddresses || [],
+      subject: viewingEmail.subject?.startsWith("Re:")
+        ? viewingEmail.subject
+        : `Re: ${viewingEmail.subject}`,
+      body: quotedBody,
+      inReplyTo: viewingEmail.messageId,
+    });
+  };
+
+  const handleForward = () => {
+    if (!viewingEmail) return;
+    const messageBody =
+      viewingEmail.bodyText || (viewingEmail.bodyHtml ? "(HTML content)" : "");
+    setComposing(true, {
+      subject: viewingEmail.subject?.startsWith("Fwd:")
+        ? viewingEmail.subject
+        : `Fwd: ${viewingEmail.subject}`,
+      body: `\n\n---------- Forwarded message ----------\nFrom: ${viewingEmail.fromName || viewingEmail.fromAddress}\nDate: ${new Date(viewingEmail.sentAt || viewingEmail.receivedAt).toLocaleString()}\nSubject: ${viewingEmail.subject}\nTo: ${viewingEmail.toAddresses?.join(", ") || ""}\n\n${messageBody}`,
+    });
+  };
+
   const filteredEmails = searchQuery
     ? emails.filter((e) =>
         e.subject?.toLowerCase().includes(searchQuery.toLowerCase()),
@@ -89,14 +130,9 @@ export default function StarredPage() {
       <EmailView
         email={viewingEmail}
         onBack={handleBack}
-        onReply={() =>
-          setComposing(true, {
-            to: [viewingEmail.fromAddress],
-            subject: `Re: ${viewingEmail.subject}`,
-          })
-        }
-        onReplyAll={() => {}}
-        onForward={() => {}}
+        onReply={handleReply}
+        onReplyAll={handleReplyAll}
+        onForward={handleForward}
         onDelete={() => handleAction("trash")}
         onArchive={() => handleAction("archive")}
         onToggleStar={() => handleAction("unstar")}

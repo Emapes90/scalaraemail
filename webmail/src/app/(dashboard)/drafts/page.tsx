@@ -29,10 +29,18 @@ export default function DraftsPage() {
     setLoading(true);
     try {
       const res = await fetch("/api/emails?folder=drafts&page=1&pageSize=50");
+      if (!res.ok) {
+        console.error("Failed to load drafts:", res.status);
+        return;
+      }
       const data = await res.json();
-      if (data.success) setEmails(data.data.emails);
+      if (data.success) {
+        setEmails(data.data.emails);
+      } else {
+        console.error("Failed to load drafts:", data.error);
+      }
     } catch (e) {
-      console.error(e);
+      console.error("Failed to load drafts:", e);
     } finally {
       setLoading(false);
     }
@@ -41,6 +49,8 @@ export default function DraftsPage() {
   const handleDraftClick = (email: Email) => {
     setComposing(true, {
       to: email.toAddresses || [],
+      cc: email.ccAddresses || [],
+      bcc: email.bccAddresses || [],
       subject: email.subject || "",
       body: email.bodyText || "",
     });

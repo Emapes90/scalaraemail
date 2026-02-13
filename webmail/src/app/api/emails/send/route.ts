@@ -5,15 +5,24 @@ import { prisma } from "@/lib/db";
 import { sendEmail } from "@/lib/mail";
 import { z } from "zod";
 
-const sendEmailSchema = z.object({
-  to: z.array(z.string().email()).min(1, "At least one recipient is required"),
-  cc: z.array(z.string().email()).optional().default([]),
-  bcc: z.array(z.string().email()).optional().default([]),
-  subject: z.string().min(1, "Subject is required"),
-  body: z.string().min(1, "Message body is required"),
-  inReplyTo: z.string().optional(),
-  isHtml: z.boolean().optional().default(false),
-});
+const sendEmailSchema = z
+  .object({
+    to: z
+      .array(z.string().email())
+      .min(1, "At least one recipient is required"),
+    cc: z.array(z.string().email()).optional().default([]),
+    bcc: z.array(z.string().email()).optional().default([]),
+    subject: z.string().min(1, "Subject is required"),
+    body: z.string().min(1, "Message body is required"),
+    inReplyTo: z.string().optional(),
+    isHtml: z.boolean().optional().default(false),
+  })
+  .transform((data) => ({
+    ...data,
+    // Filter out any empty strings that might slip through
+    cc: data.cc.filter(Boolean),
+    bcc: data.bcc.filter(Boolean),
+  }));
 
 export async function POST(request: NextRequest) {
   try {
@@ -31,6 +40,27 @@ export async function POST(request: NextRequest) {
 
     if (!user) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
+
+    if (!user.mailPassword) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "Mail password not configured. Please contact your admin to set up your email account.",
+        },
+        { status: 400 },
+      );
+    }
+
+    if (!user.smtpHost || !user.smtpPort) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "SMTP server not configured. Please contact your admin.",
+        },
+        { status: 400 },
+      );
     }
 
     const result = await sendEmail(

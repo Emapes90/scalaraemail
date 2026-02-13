@@ -6,14 +6,15 @@ import { hashPassword, verifyPassword } from "@/lib/crypto";
 import { z } from "zod";
 
 const updateSettingsSchema = z.object({
-  name: z.string().optional(),
-  signature: z.string().optional(),
-  timezone: z.string().optional(),
-  language: z.string().optional(),
-  emailsPerPage: z.number().min(10).max(100).optional(),
-  theme: z.string().optional(),
-  notifications: z.boolean().optional(),
-  autoRefresh: z.number().min(0).max(300).optional(),
+  name: z.string().nullable().optional(),
+  signature: z.string().nullable().optional(),
+  // Non-nullable DB columns — coerce null/empty to defaults
+  timezone: z.string().min(1).optional().default("UTC"),
+  language: z.string().min(1).optional().default("en"),
+  emailsPerPage: z.number().min(10).max(100).optional().default(50),
+  theme: z.string().min(1).optional().default("dark"),
+  notifications: z.boolean().optional().default(true),
+  autoRefresh: z.number().min(0).max(300).optional().default(30),
 });
 
 const changePasswordSchema = z.object({
@@ -104,12 +105,49 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ success: true, message: "Password updated" });
     }
 
-    // Handle settings update
-    const validated = updateSettingsSchema.parse(body);
+    // Handle settings update — strip non-settings fields before validation
+    const {
+      id,
+      email,
+      avatar,
+      imapHost,
+      imapPort,
+      smtpHost,
+      smtpPort,
+      createdAt,
+      lastLoginAt,
+      updatedAt,
+      passwordHash,
+      mailPassword,
+      ...settingsOnly
+    } = body;
+
+    // Pre-clean: convert null to undefined for non-nullable fields so Zod defaults kick in
+    const nonNullableFields = [
+      "timezone",
+      "language",
+      "emailsPerPage",
+      "theme",
+      "notifications",
+      "autoRefresh",
+    ];
+    for (const field of nonNullableFields) {
+      if (settingsOnly[field] === null || settingsOnly[field] === "") {
+        delete settingsOnly[field];
+      }
+    }
+
+    const validated = updateSettingsSchema.parse(settingsOnly);
+
+    // Remove undefined keys so Prisma only updates provided fields
+    const cleanData: Record<string, any> = {};
+    for (const [key, value] of Object.entries(validated)) {
+      if (value !== undefined) cleanData[key] = value;
+    }
 
     const user = await prisma.user.update({
       where: { email: session.user.email },
-      data: validated,
+      data: cleanData,
       select: {
         id: true,
         email: true,

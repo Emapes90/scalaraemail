@@ -4,9 +4,7 @@ import React from "react";
 import { cn, formatFullDate, formatFileSize } from "@/lib/utils";
 import { Avatar } from "@/components/ui/Avatar";
 import { Button } from "@/components/ui/Button";
-import { Badge } from "@/components/ui/Badge";
 import { Dropdown } from "@/components/ui/Dropdown";
-import { useMailStore } from "@/store/useMailStore";
 import {
   ArrowLeft,
   Reply,

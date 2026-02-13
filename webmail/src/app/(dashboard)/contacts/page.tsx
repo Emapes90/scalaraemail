@@ -30,7 +30,9 @@ export default function ContactsPage() {
     }
   };
 
-  const handleCreateContact = async (contact: any) => {
+  const handleCreateContact = async (
+    contact: any,
+  ): Promise<{ success: boolean; error?: string }> => {
     try {
       const res = await fetch("/api/contacts", {
         method: "POST",
@@ -44,13 +46,21 @@ export default function ContactsPage() {
             a.displayName.localeCompare(b.displayName),
           ),
         );
+        return { success: true };
       }
+      return {
+        success: false,
+        error: data.error || "Failed to create contact",
+      };
     } catch (e) {
       console.error("Failed to create contact:", e);
+      return { success: false, error: "Network error. Please try again." };
     }
   };
 
-  const handleUpdateContact = async (contact: any) => {
+  const handleUpdateContact = async (
+    contact: any,
+  ): Promise<{ success: boolean; error?: string }> => {
     try {
       const res = await fetch("/api/contacts", {
         method: "PUT",
@@ -62,9 +72,15 @@ export default function ContactsPage() {
         setContacts((prev) =>
           prev.map((c) => (c.id === data.data.id ? data.data : c)),
         );
+        return { success: true };
       }
+      return {
+        success: false,
+        error: data.error || "Failed to update contact",
+      };
     } catch (e) {
       console.error("Failed to update contact:", e);
+      return { success: false, error: "Network error. Please try again." };
     }
   };
 

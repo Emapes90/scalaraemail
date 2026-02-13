@@ -13,12 +13,10 @@ import {
   Bell,
   Palette,
   Mail,
-  Globe,
   Key,
   Save,
   RefreshCw,
   Server,
-  Clock,
   Eye,
   EyeOff,
 } from "lucide-react";
@@ -82,10 +80,22 @@ export default function SettingsPage() {
     setSaving(true);
     setMessage(null);
     try {
+      // Only send settings-relevant fields, not the whole user object
+      const payload = {
+        name: settings.name || null,
+        signature: settings.signature || null,
+        timezone: settings.timezone || "UTC",
+        language: settings.language || "en",
+        emailsPerPage: settings.emailsPerPage || 50,
+        theme: settings.theme || "dark",
+        notifications: settings.notifications ?? true,
+        autoRefresh: settings.autoRefresh ?? 30,
+      };
+
       const res = await fetch("/api/settings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(settings),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
       if (data.success) {

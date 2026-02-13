@@ -5,8 +5,8 @@ import { prisma } from "@/lib/db";
 import { z } from "zod";
 
 const contactSchema = z.object({
-  firstName: z.string().optional(),
-  lastName: z.string().optional(),
+  firstName: z.string().nullable().optional(),
+  lastName: z.string().nullable().optional(),
   displayName: z.string().min(1),
   emails: z
     .array(
@@ -28,12 +28,12 @@ const contactSchema = z.object({
     )
     .optional()
     .default([]),
-  company: z.string().optional(),
-  jobTitle: z.string().optional(),
-  website: z.string().optional(),
-  address: z.string().optional(),
-  notes: z.string().optional(),
-  birthday: z.string().optional(),
+  company: z.string().nullable().optional(),
+  jobTitle: z.string().nullable().optional(),
+  website: z.string().nullable().optional(),
+  address: z.string().nullable().optional(),
+  notes: z.string().nullable().optional(),
+  birthday: z.string().nullable().optional(),
   isFavorite: z.boolean().optional().default(false),
 });
 

@@ -32,8 +32,12 @@ import type { Contact, ContactGroup } from "@/types";
 interface ContactListProps {
   contacts: Contact[];
   groups: ContactGroup[];
-  onCreateContact: (contact: any) => void;
-  onUpdateContact: (contact: any) => void;
+  onCreateContact: (
+    contact: any,
+  ) => Promise<{ success: boolean; error?: string }>;
+  onUpdateContact: (
+    contact: any,
+  ) => Promise<{ success: boolean; error?: string }>;
   onDeleteContact: (id: string) => void;
 }
 
@@ -48,6 +52,8 @@ export function ContactList({
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [activeGroup, setActiveGroup] = useState<string | null>(null);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [isCreating, setIsCreating] = useState(false);
   const [contactForm, setContactForm] = useState({
     firstName: "",
     lastName: "",
@@ -85,39 +91,58 @@ export function ContactList({
     groupedContacts[letter].push(contact);
   });
 
-  const handleCreate = () => {
+  const handleCreate = async () => {
+    setCreateError(null);
     const displayName =
       [contactForm.firstName, contactForm.lastName].filter(Boolean).join(" ") ||
       contactForm.email;
-    onCreateContact({
-      firstName: contactForm.firstName || null,
-      lastName: contactForm.lastName || null,
-      displayName,
-      emails: contactForm.email
-        ? [{ email: contactForm.email, type: "personal", isPrimary: true }]
-        : [],
-      phones: contactForm.phone
-        ? [{ phone: contactForm.phone, type: "mobile", isPrimary: true }]
-        : [],
-      company: contactForm.company || null,
-      jobTitle: contactForm.jobTitle || null,
-      website: contactForm.website || null,
-      address: contactForm.address || null,
-      notes: contactForm.notes || null,
-    });
-    setShowCreateModal(false);
-    setContactForm({
-      firstName: "",
-      lastName: "",
-      displayName: "",
-      email: "",
-      phone: "",
-      company: "",
-      jobTitle: "",
-      website: "",
-      address: "",
-      notes: "",
-    });
+
+    if (!displayName.trim()) {
+      setCreateError("Please enter a name or email address");
+      return;
+    }
+
+    setIsCreating(true);
+    try {
+      const result = await onCreateContact({
+        firstName: contactForm.firstName || null,
+        lastName: contactForm.lastName || null,
+        displayName,
+        emails: contactForm.email
+          ? [{ email: contactForm.email, type: "personal", isPrimary: true }]
+          : [],
+        phones: contactForm.phone
+          ? [{ phone: contactForm.phone, type: "mobile", isPrimary: true }]
+          : [],
+        company: contactForm.company || null,
+        jobTitle: contactForm.jobTitle || null,
+        website: contactForm.website || null,
+        address: contactForm.address || null,
+        notes: contactForm.notes || null,
+      });
+
+      if (result.success) {
+        setShowCreateModal(false);
+        setContactForm({
+          firstName: "",
+          lastName: "",
+          displayName: "",
+          email: "",
+          phone: "",
+          company: "",
+          jobTitle: "",
+          website: "",
+          address: "",
+          notes: "",
+        });
+      } else {
+        setCreateError(result.error || "Failed to create contact");
+      }
+    } catch {
+      setCreateError("Unexpected error. Please try again.");
+    } finally {
+      setIsCreating(false);
+    }
   };
 
   return (
@@ -464,6 +489,11 @@ export function ContactList({
         size="md"
       >
         <div className="space-y-4">
+          {createError && (
+            <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-sm text-red-400">
+              {createError}
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-4">
             <Input
               label="First Name"
@@ -541,10 +571,18 @@ export function ContactList({
             rows={3}
           />
           <div className="flex justify-end gap-2 pt-2">
-            <Button variant="ghost" onClick={() => setShowCreateModal(false)}>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setShowCreateModal(false);
+                setCreateError(null);
+              }}
+            >
               Cancel
             </Button>
-            <Button onClick={handleCreate}>Create Contact</Button>
+            <Button onClick={handleCreate} loading={isCreating}>
+              Create Contact
+            </Button>
           </div>
         </div>
       </Modal>

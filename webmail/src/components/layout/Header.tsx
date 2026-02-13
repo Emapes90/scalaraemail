@@ -2,7 +2,7 @@
 
 import React from "react";
 import { usePathname } from "next/navigation";
-import { cn } from "@/lib/utils";
+import { signOut } from "next-auth/react";
 import { useMailStore } from "@/store/useMailStore";
 import { Avatar } from "@/components/ui/Avatar";
 import { Dropdown } from "@/components/ui/Dropdown";
@@ -15,7 +15,6 @@ import {
   Settings,
   HelpCircle,
   Bell,
-  Moon,
 } from "lucide-react";
 
 export function Header() {
@@ -96,7 +95,7 @@ export function Header() {
                 label: "Sign Out",
                 icon: <LogOut className="h-4 w-4" />,
                 onClick: () => {
-                  window.location.href = "/login";
+                  signOut({ callbackUrl: "/login" });
                 },
                 danger: true,
                 divider: true,

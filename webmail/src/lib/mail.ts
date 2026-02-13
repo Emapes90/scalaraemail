@@ -343,8 +343,9 @@ export async function sendEmail(
     tls: {
       rejectUnauthorized: false,
     },
-    connectionTimeout: 15000,
-    greetingTimeout: 15000,
+    connectionTimeout: 30000,
+    greetingTimeout: 30000,
+    socketTimeout: 30000,
   });
 
   try {

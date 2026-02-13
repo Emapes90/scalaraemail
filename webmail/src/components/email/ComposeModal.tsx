@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import { useMailStore } from "@/store/useMailStore";
 import { Button } from "@/components/ui/Button";
@@ -22,60 +22,107 @@ import {
   Trash2,
   ChevronDown,
   ChevronUp,
+  AlertCircle,
 } from "lucide-react";
 
 export function ComposeModal() {
   const { isComposing, composeData, setComposing } = useMailStore();
-  const [to, setTo] = useState(composeData?.to?.join(", ") || "");
-  const [cc, setCc] = useState(composeData?.cc?.join(", ") || "");
-  const [bcc, setBcc] = useState(composeData?.bcc?.join(", ") || "");
-  const [subject, setSubject] = useState(composeData?.subject || "");
-  const [body, setBody] = useState(composeData?.body || "");
+  const [to, setTo] = useState("");
+  const [cc, setCc] = useState("");
+  const [bcc, setBcc] = useState("");
+  const [subject, setSubject] = useState("");
+  const [body, setBody] = useState("");
   const [showCc, setShowCc] = useState(false);
   const [showBcc, setShowBcc] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isSending, setIsSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<File[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Sync composeData to local state when opening (Reply/Forward/New)
+  useEffect(() => {
+    if (isComposing && composeData) {
+      setTo(composeData.to?.join(", ") || "");
+      setCc(composeData.cc?.join(", ") || "");
+      setBcc(composeData.bcc?.join(", ") || "");
+      setSubject(composeData.subject || "");
+      setBody(composeData.body || "");
+      setShowCc((composeData.cc?.length || 0) > 0);
+      setShowBcc((composeData.bcc?.length || 0) > 0);
+      setSendError(null);
+    } else if (isComposing) {
+      setTo("");
+      setCc("");
+      setBcc("");
+      setSubject("");
+      setBody("");
+      setSendError(null);
+    }
+  }, [isComposing, composeData]);
 
   if (!isComposing) return null;
 
   const handleSend = async () => {
+    if (!to.trim()) {
+      setSendError("Please add at least one recipient");
+      return;
+    }
+    if (!subject.trim()) {
+      setSendError("Please add a subject");
+      return;
+    }
+    if (!body.trim()) {
+      setSendError("Please write a message");
+      return;
+    }
+
     setIsSending(true);
+    setSendError(null);
     try {
+      const toList = to
+        .split(",")
+        .map((e) => e.trim())
+        .filter(Boolean);
+      const ccList = cc
+        .split(",")
+        .map((e) => e.trim())
+        .filter(Boolean);
+      const bccList = bcc
+        .split(",")
+        .map((e) => e.trim())
+        .filter(Boolean);
+
       const response = await fetch("/api/emails/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          to: to
-            .split(",")
-            .map((e) => e.trim())
-            .filter(Boolean),
-          cc: cc
-            .split(",")
-            .map((e) => e.trim())
-            .filter(Boolean),
-          bcc: bcc
-            .split(",")
-            .map((e) => e.trim())
-            .filter(Boolean),
+          to: toList,
+          cc: ccList.length > 0 ? ccList : undefined,
+          bcc: bccList.length > 0 ? bccList : undefined,
           subject,
           body,
         }),
       });
 
-      if (response.ok) {
+      const data = await response.json();
+
+      if (response.ok && data.success) {
         setComposing(false);
-        // Reset fields
         setTo("");
         setCc("");
         setBcc("");
         setSubject("");
         setBody("");
         setAttachments([]);
+      } else {
+        setSendError(data.error || "Failed to send email. Please try again.");
       }
     } catch (error) {
       console.error("Failed to send email:", error);
+      setSendError(
+        "Network error. Please check your connection and try again.",
+      );
     } finally {
       setIsSending(false);
     }
@@ -192,6 +239,20 @@ export function ComposeModal() {
           />
         </div>
       </div>
+
+      {/* Error Message */}
+      {sendError && (
+        <div className="mx-4 mt-2 p-2 rounded-lg bg-red-500/10 border border-red-500/20 flex items-center gap-2">
+          <AlertCircle className="h-4 w-4 text-red-400 shrink-0" />
+          <p className="text-xs text-red-400">{sendError}</p>
+          <button
+            onClick={() => setSendError(null)}
+            className="ml-auto text-red-400 hover:text-red-300"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        </div>
+      )}
 
       {/* Body Editor */}
       <div className="flex-1 overflow-y-auto custom-scrollbar">

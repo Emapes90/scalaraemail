@@ -22,9 +22,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Tag,
-  FolderPlus,
   Mail,
-  LogOut,
 } from "lucide-react";
 
 interface NavItem {

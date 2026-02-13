@@ -19,19 +19,23 @@ export async function middleware(request: NextRequest) {
   });
 
   if (!token) {
-    // If user just came from login, avoid infinite loop
-    const referer = request.headers.get("referer") || "";
-    if (referer.includes("/login")) {
-      console.error("[Middleware] Token not found after login. Cookie issue.");
-      console.error("[Middleware] NEXTAUTH_URL:", process.env.NEXTAUTH_URL);
-      console.error("[Middleware] Request URL:", request.url);
-      console.error(
-        "[Middleware] Cookies:",
-        request.cookies
-          .getAll()
-          .map((c) => c.name)
-          .join(", "),
-      );
+    // Debug logging only in non-production
+    if (process.env.NODE_ENV !== "production") {
+      const referer = request.headers.get("referer") || "";
+      if (referer.includes("/login")) {
+        console.error(
+          "[Middleware] Token not found after login. Cookie issue.",
+        );
+        console.error("[Middleware] NEXTAUTH_URL:", process.env.NEXTAUTH_URL);
+        console.error("[Middleware] Request URL:", request.url);
+        console.error(
+          "[Middleware] Cookies:",
+          request.cookies
+            .getAll()
+            .map((c) => c.name)
+            .join(", "),
+        );
+      }
     }
     const loginUrl = new URL("/login", request.url);
     loginUrl.searchParams.set("callbackUrl", pathname);
@@ -42,7 +46,11 @@ export async function middleware(request: NextRequest) {
   const response = NextResponse.next();
   response.headers.set("X-Content-Type-Options", "nosniff");
   response.headers.set("X-Frame-Options", "DENY");
-  response.headers.set("X-XSS-Protection", "1; mode=block");
+  response.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+  response.headers.set(
+    "Strict-Transport-Security",
+    "max-age=63072000; includeSubDomains; preload",
+  );
 
   return response;
 }

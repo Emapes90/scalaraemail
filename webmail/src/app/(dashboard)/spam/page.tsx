@@ -18,7 +18,6 @@ export default function SpamPage() {
     isLoading,
     setLoading,
     searchQuery,
-    setComposing,
   } = useMailStore();
   const [viewingEmail, setViewingEmail] = useState<Email | null>(null);
 
@@ -79,6 +78,18 @@ export default function SpamPage() {
       )
     : emails;
 
+  const handleDeleteSpam = async () => {
+    const uid = viewingEmail?.uid;
+    if (!uid) return;
+    try {
+      await fetch(`/api/emails/${uid}?folder=spam`, { method: "DELETE" });
+      removeEmails([String(uid)]);
+      handleBack();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   if (isLoading) return <PageLoader />;
   if (viewingEmail)
     return (
@@ -88,7 +99,7 @@ export default function SpamPage() {
         onReply={() => {}}
         onReplyAll={() => {}}
         onForward={() => {}}
-        onDelete={() => {}}
+        onDelete={handleDeleteSpam}
         onArchive={handleNotSpam}
         onToggleStar={() => {}}
       />

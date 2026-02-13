@@ -37,9 +37,15 @@ export default function CalendarPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(event),
       });
+      if (!res.ok) {
+        console.error("Failed to create event: server returned", res.status);
+        return;
+      }
       const data = await res.json();
       if (data.success) {
         setEvents((prev) => [...prev, data.data]);
+      } else {
+        console.error("Failed to create event:", data.error);
       }
     } catch (e) {
       console.error("Failed to create event:", e);
@@ -53,11 +59,17 @@ export default function CalendarPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(event),
       });
+      if (!res.ok) {
+        console.error("Failed to update event: server returned", res.status);
+        return;
+      }
       const data = await res.json();
       if (data.success) {
         setEvents((prev) =>
           prev.map((e) => (e.id === data.data.id ? data.data : e)),
         );
+      } else {
+        console.error("Failed to update event:", data.error);
       }
     } catch (e) {
       console.error("Failed to update event:", e);
@@ -66,8 +78,17 @@ export default function CalendarPage() {
 
   const handleDeleteEvent = async (id: string) => {
     try {
-      await fetch(`/api/calendar?id=${id}`, { method: "DELETE" });
-      setEvents((prev) => prev.filter((e) => e.id !== id));
+      const res = await fetch(`/api/calendar?id=${id}`, { method: "DELETE" });
+      if (!res.ok) {
+        console.error("Failed to delete event: server returned", res.status);
+        return;
+      }
+      const data = await res.json();
+      if (data.success) {
+        setEvents((prev) => prev.filter((e) => e.id !== id));
+      } else {
+        console.error("Failed to delete event:", data.error);
+      }
     } catch (e) {
       console.error("Failed to delete event:", e);
     }

@@ -6,7 +6,13 @@ import { verifyPassword } from "@/lib/crypto";
 const rawUrl = process.env.NEXTAUTH_URL || "";
 const fullUrl = rawUrl.startsWith("http") ? rawUrl : `https://${rawUrl}`;
 const useSecureCookies = fullUrl.startsWith("https://");
-const hostName = rawUrl ? new URL(fullUrl).hostname : undefined;
+let hostName: string | undefined;
+try {
+  hostName = rawUrl ? new URL(fullUrl).hostname : undefined;
+} catch {
+  console.error("[Auth] Invalid NEXTAUTH_URL:", rawUrl);
+  hostName = undefined;
+}
 
 export const authOptions: NextAuthOptions = {
   debug: process.env.NODE_ENV !== "production",
@@ -20,24 +26,23 @@ export const authOptions: NextAuthOptions = {
       async authorize(credentials) {
         try {
           if (!credentials?.email || !credentials?.password) {
-            console.error("[Auth] Missing email or password");
             return null;
           }
 
           const email = credentials.email.toLowerCase().trim();
-          console.log("[Auth] Login attempt for:", email);
+          if (process.env.NODE_ENV !== "production") {
+            console.log("[Auth] Login attempt for:", email);
+          }
 
           const user = await prisma.user.findUnique({
             where: { email },
           });
 
           if (!user) {
-            console.error("[Auth] User not found:", email);
             return null;
           }
 
           if (!user.passwordHash) {
-            console.error("[Auth] No password hash for:", email);
             return null;
           }
 
@@ -47,15 +52,12 @@ export const authOptions: NextAuthOptions = {
           );
 
           if (!isValid) {
-            console.error("[Auth] Invalid password for:", email);
-            console.error(
-              "[Auth] Hash format:",
-              user.passwordHash.substring(0, 20) + "...",
-            );
             return null;
           }
 
-          console.log("[Auth] Login successful for:", email);
+          if (process.env.NODE_ENV !== "production") {
+            console.log("[Auth] Login successful for:", email);
+          }
 
           // Update last login (non-blocking)
           prisma.user

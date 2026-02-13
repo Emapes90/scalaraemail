@@ -34,8 +34,8 @@ export async function GET(request: NextRequest) {
 
     const where: any = { userId: user.id };
     if (start && end) {
-      where.startTime = { gte: new Date(start) };
-      where.endTime = { lte: new Date(end) };
+      where.startTime = { lte: new Date(end) };
+      where.endTime = { gte: new Date(start) };
     }
 
     const events = await prisma.calendarEvent.findMany({
@@ -69,7 +69,7 @@ export async function GET(request: NextRequest) {
   } catch (error: any) {
     console.error("Calendar fetch error:", error);
     return NextResponse.json(
-      { success: false, error: error.message },
+      { success: false, error: "Failed to fetch calendar data" },
       { status: 500 },
     );
   }
@@ -111,7 +111,7 @@ export async function POST(request: NextRequest) {
     }
     console.error("Calendar create error:", error);
     return NextResponse.json(
-      { success: false, error: error.message },
+      { success: false, error: "Failed to create event" },
       { status: 500 },
     );
   }
@@ -131,13 +131,31 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
 
     const body = await request.json();
-    const { id, ...data } = body;
+    const { id, ...rawData } = body;
 
     if (!id)
       return NextResponse.json(
         { error: "Event ID is required" },
         { status: 400 },
       );
+
+    // Only allow known fields to be updated
+    const allowedFields = [
+      "title",
+      "description",
+      "location",
+      "startTime",
+      "endTime",
+      "allDay",
+      "color",
+      "calendarId",
+    ];
+    const data: Record<string, any> = {};
+    for (const key of allowedFields) {
+      if (rawData[key] !== undefined) {
+        data[key] = rawData[key];
+      }
+    }
 
     const event = await prisma.calendarEvent.update({
       where: { id, userId: user.id },
@@ -153,7 +171,7 @@ export async function PUT(request: NextRequest) {
   } catch (error: any) {
     console.error("Calendar update error:", error);
     return NextResponse.json(
-      { success: false, error: error.message },
+      { success: false, error: "Failed to update event" },
       { status: 500 },
     );
   }
@@ -186,7 +204,7 @@ export async function DELETE(request: NextRequest) {
   } catch (error: any) {
     console.error("Calendar delete error:", error);
     return NextResponse.json(
-      { success: false, error: error.message },
+      { success: false, error: "Failed to delete event" },
       { status: 500 },
     );
   }

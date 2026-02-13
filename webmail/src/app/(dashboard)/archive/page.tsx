@@ -73,6 +73,65 @@ export default function ArchivePage() {
     }
   };
 
+  const handleReply = () => {
+    if (!viewingEmail) return;
+    const originalText = viewingEmail.bodyText || "";
+    const quotedBody = `\n\n\nOn ${new Date(viewingEmail.sentAt || viewingEmail.receivedAt).toLocaleString()}, ${viewingEmail.fromName || viewingEmail.fromAddress} wrote:\n> ${originalText.split("\n").join("\n> ")}`;
+    setComposing(true, {
+      to: [viewingEmail.fromAddress],
+      subject: viewingEmail.subject?.startsWith("Re:")
+        ? viewingEmail.subject
+        : `Re: ${viewingEmail.subject}`,
+      body: quotedBody,
+      inReplyTo: viewingEmail.messageId,
+    });
+  };
+
+  const handleReplyAll = () => {
+    if (!viewingEmail) return;
+    const originalText = viewingEmail.bodyText || "";
+    const quotedBody = `\n\n\nOn ${new Date(viewingEmail.sentAt || viewingEmail.receivedAt).toLocaleString()}, ${viewingEmail.fromName || viewingEmail.fromAddress} wrote:\n> ${originalText.split("\n").join("\n> ")}`;
+    setComposing(true, {
+      to: [viewingEmail.fromAddress, ...(viewingEmail.toAddresses || [])],
+      cc: viewingEmail.ccAddresses || [],
+      subject: viewingEmail.subject?.startsWith("Re:")
+        ? viewingEmail.subject
+        : `Re: ${viewingEmail.subject}`,
+      body: quotedBody,
+      inReplyTo: viewingEmail.messageId,
+    });
+  };
+
+  const handleForward = () => {
+    if (!viewingEmail) return;
+    const messageBody =
+      viewingEmail.bodyText || (viewingEmail.bodyHtml ? "(HTML content)" : "");
+    setComposing(true, {
+      subject: viewingEmail.subject?.startsWith("Fwd:")
+        ? viewingEmail.subject
+        : `Fwd: ${viewingEmail.subject}`,
+      body: `\n\n---------- Forwarded message ----------\nFrom: ${viewingEmail.fromName || viewingEmail.fromAddress}\nDate: ${new Date(viewingEmail.sentAt || viewingEmail.receivedAt).toLocaleString()}\nSubject: ${viewingEmail.subject}\nTo: ${viewingEmail.toAddresses?.join(", ") || ""}\n\n${messageBody}`,
+    });
+  };
+
+  const handleAction = async (action: string) => {
+    const uid = viewingEmail?.uid;
+    if (!uid) return;
+    try {
+      await fetch(`/api/emails/${uid}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, folder: "archive" }),
+      });
+      if (["trash", "spam"].includes(action)) {
+        removeEmails([String(uid)]);
+        handleBack();
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   const filteredEmails = searchQuery
     ? emails.filter((e) =>
         e.subject?.toLowerCase().includes(searchQuery.toLowerCase()),
@@ -85,17 +144,14 @@ export default function ArchivePage() {
       <EmailView
         email={viewingEmail}
         onBack={handleBack}
-        onReply={() =>
-          setComposing(true, {
-            to: [viewingEmail.fromAddress],
-            subject: `Re: ${viewingEmail.subject}`,
-          })
-        }
-        onReplyAll={() => {}}
-        onForward={() => {}}
-        onDelete={() => {}}
+        onReply={handleReply}
+        onReplyAll={handleReplyAll}
+        onForward={handleForward}
+        onDelete={() => handleAction("trash")}
         onArchive={handleMoveToInbox}
-        onToggleStar={() => {}}
+        onToggleStar={() =>
+          handleAction(viewingEmail.isStarred ? "unstar" : "star")
+        }
       />
     );
 

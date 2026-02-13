@@ -10,7 +10,13 @@ const PBKDF2_DIGEST = "sha512";
 function getKey(): Buffer {
   const key = process.env.ENCRYPTION_KEY;
   if (!key) throw new Error("ENCRYPTION_KEY environment variable is not set");
-  return Buffer.from(key, "hex");
+  const buf = Buffer.from(key, "hex");
+  if (buf.length !== 32) {
+    throw new Error(
+      `ENCRYPTION_KEY must be exactly 64 hex characters (32 bytes for AES-256), got ${key.length} hex characters`,
+    );
+  }
+  return buf;
 }
 
 export function encrypt(text: string): string {

@@ -14,11 +14,9 @@ export default function SentPage() {
   const {
     emails,
     setEmails,
-    activeEmail,
     setActiveEmail,
     setActiveFolder,
     setComposing,
-    updateEmail,
     removeEmails,
     isLoading,
     setLoading,
@@ -87,20 +85,56 @@ export default function SentPage() {
       )
     : emails;
 
+  const handleReply = () => {
+    if (!viewingEmail) return;
+    const originalText = viewingEmail.bodyText || "";
+    const quotedBody = `\n\n\nOn ${new Date(viewingEmail.sentAt || viewingEmail.receivedAt).toLocaleString()}, ${viewingEmail.fromName || viewingEmail.fromAddress} wrote:\n> ${originalText.split("\n").join("\n> ")}`;
+    setComposing(true, {
+      to: [viewingEmail.fromAddress],
+      subject: viewingEmail.subject?.startsWith("Re:")
+        ? viewingEmail.subject
+        : `Re: ${viewingEmail.subject}`,
+      body: quotedBody,
+      inReplyTo: viewingEmail.messageId,
+    });
+  };
+
+  const handleReplyAll = () => {
+    if (!viewingEmail) return;
+    const originalText = viewingEmail.bodyText || "";
+    const quotedBody = `\n\n\nOn ${new Date(viewingEmail.sentAt || viewingEmail.receivedAt).toLocaleString()}, ${viewingEmail.fromName || viewingEmail.fromAddress} wrote:\n> ${originalText.split("\n").join("\n> ")}`;
+    setComposing(true, {
+      to: [viewingEmail.fromAddress, ...(viewingEmail.toAddresses || [])],
+      cc: viewingEmail.ccAddresses || [],
+      subject: viewingEmail.subject?.startsWith("Re:")
+        ? viewingEmail.subject
+        : `Re: ${viewingEmail.subject}`,
+      body: quotedBody,
+      inReplyTo: viewingEmail.messageId,
+    });
+  };
+
+  const handleForward = () => {
+    if (!viewingEmail) return;
+    const messageBody =
+      viewingEmail.bodyText || (viewingEmail.bodyHtml ? "(HTML content)" : "");
+    setComposing(true, {
+      subject: viewingEmail.subject?.startsWith("Fwd:")
+        ? viewingEmail.subject
+        : `Fwd: ${viewingEmail.subject}`,
+      body: `\n\n---------- Forwarded message ----------\nFrom: ${viewingEmail.fromName || viewingEmail.fromAddress}\nDate: ${new Date(viewingEmail.sentAt || viewingEmail.receivedAt).toLocaleString()}\nSubject: ${viewingEmail.subject}\nTo: ${viewingEmail.toAddresses?.join(", ") || ""}\n\n${messageBody}`,
+    });
+  };
+
   if (isLoading) return <PageLoader />;
   if (viewingEmail)
     return (
       <EmailView
         email={viewingEmail}
         onBack={handleBack}
-        onReply={() => {}}
-        onReplyAll={() => {}}
-        onForward={() =>
-          setComposing(true, {
-            subject: `Fwd: ${viewingEmail.subject}`,
-            body: viewingEmail.bodyText || "",
-          })
-        }
+        onReply={handleReply}
+        onReplyAll={handleReplyAll}
+        onForward={handleForward}
         onDelete={() => handleAction("trash")}
         onArchive={() => handleAction("archive")}
         onToggleStar={() =>

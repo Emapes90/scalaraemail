@@ -8,7 +8,6 @@ import { EmailToolbar } from "@/components/email/EmailToolbar";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { PageLoader } from "@/components/ui/Loader";
 import { Trash2 } from "lucide-react";
-import { Button } from "@/components/ui/Button";
 import type { Email } from "@/types";
 
 export default function TrashPage() {
@@ -16,7 +15,6 @@ export default function TrashPage() {
     emails,
     setEmails,
     setActiveFolder,
-    updateEmail,
     removeEmails,
     isLoading,
     setLoading,
@@ -94,15 +92,41 @@ export default function TrashPage() {
       )
     : emails;
 
+  const handleReply = () => {
+    if (!viewingEmail) return;
+    const originalText = viewingEmail.bodyText || "";
+    const quotedBody = `\n\n\nOn ${new Date(viewingEmail.sentAt || viewingEmail.receivedAt).toLocaleString()}, ${viewingEmail.fromName || viewingEmail.fromAddress} wrote:\n> ${originalText.split("\n").join("\n> ")}`;
+    setComposing(true, {
+      to: [viewingEmail.fromAddress],
+      subject: viewingEmail.subject?.startsWith("Re:")
+        ? viewingEmail.subject
+        : `Re: ${viewingEmail.subject}`,
+      body: quotedBody,
+      inReplyTo: viewingEmail.messageId,
+    });
+  };
+
+  const handleForward = () => {
+    if (!viewingEmail) return;
+    const messageBody =
+      viewingEmail.bodyText || (viewingEmail.bodyHtml ? "(HTML content)" : "");
+    setComposing(true, {
+      subject: viewingEmail.subject?.startsWith("Fwd:")
+        ? viewingEmail.subject
+        : `Fwd: ${viewingEmail.subject}`,
+      body: `\n\n---------- Forwarded message ----------\nFrom: ${viewingEmail.fromName || viewingEmail.fromAddress}\nDate: ${new Date(viewingEmail.sentAt || viewingEmail.receivedAt).toLocaleString()}\nSubject: ${viewingEmail.subject}\nTo: ${viewingEmail.toAddresses?.join(", ") || ""}\n\n${messageBody}`,
+    });
+  };
+
   if (isLoading) return <PageLoader />;
   if (viewingEmail)
     return (
       <EmailView
         email={viewingEmail}
         onBack={handleBack}
-        onReply={() => {}}
-        onReplyAll={() => {}}
-        onForward={() => {}}
+        onReply={handleReply}
+        onReplyAll={handleReply}
+        onForward={handleForward}
         onDelete={handleDelete}
         onArchive={handleRestore}
         onToggleStar={() => {}}

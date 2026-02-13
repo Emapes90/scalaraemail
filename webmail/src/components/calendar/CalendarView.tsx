@@ -49,6 +49,7 @@ export function CalendarView({
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [showEventModal, setShowEventModal] = useState(false);
+  const [editingEventId, setEditingEventId] = useState<string | null>(null);
   const [showEventDetail, setShowEventDetail] = useState<CalendarEvent | null>(
     null,
   );
@@ -81,6 +82,7 @@ export function CalendarView({
 
   const handleCreateClick = (date?: Date) => {
     const d = date || new Date();
+    setEditingEventId(null);
     setEventForm({
       title: "",
       description: "",
@@ -94,13 +96,35 @@ export function CalendarView({
     setShowEventModal(true);
   };
 
+  const handleEditClick = (event: CalendarEvent) => {
+    setEditingEventId(event.id);
+    setEventForm({
+      title: event.title,
+      description: event.description || "",
+      location: event.location || "",
+      startTime: format(new Date(event.startTime), "yyyy-MM-dd'T'HH:mm"),
+      endTime: format(new Date(event.endTime), "yyyy-MM-dd'T'HH:mm"),
+      allDay: event.allDay,
+      calendarId: event.calendarId,
+      color: event.color || "",
+    });
+    setShowEventDetail(null);
+    setShowEventModal(true);
+  };
+
   const handleSubmitEvent = () => {
     if (!eventForm.title || !eventForm.startTime || !eventForm.endTime) return;
-    onCreateEvent({
+    const payload = {
       ...eventForm,
       startTime: new Date(eventForm.startTime).toISOString(),
       endTime: new Date(eventForm.endTime).toISOString(),
-    });
+    };
+    if (editingEventId) {
+      onUpdateEvent({ id: editingEventId, ...payload });
+    } else {
+      onCreateEvent(payload);
+    }
+    setEditingEventId(null);
     setShowEventModal(false);
   };
 
@@ -272,11 +296,14 @@ export function CalendarView({
         </div>
       </div>
 
-      {/* Create Event Modal */}
+      {/* Create/Edit Event Modal */}
       <Modal
         isOpen={showEventModal}
-        onClose={() => setShowEventModal(false)}
-        title="New Event"
+        onClose={() => {
+          setShowEventModal(false);
+          setEditingEventId(null);
+        }}
+        title={editingEventId ? "Edit Event" : "New Event"}
         size="md"
       >
         <div className="space-y-4">
@@ -361,10 +388,18 @@ export function CalendarView({
             </div>
           )}
           <div className="flex justify-end gap-2 pt-2">
-            <Button variant="ghost" onClick={() => setShowEventModal(false)}>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setShowEventModal(false);
+                setEditingEventId(null);
+              }}
+            >
               Cancel
             </Button>
-            <Button onClick={handleSubmitEvent}>Create Event</Button>
+            <Button onClick={handleSubmitEvent}>
+              {editingEventId ? "Save Changes" : "Create Event"}
+            </Button>
           </div>
         </div>
       </Modal>
@@ -422,7 +457,7 @@ export function CalendarView({
                 variant="secondary"
                 size="sm"
                 icon={<Edit3 className="h-3.5 w-3.5" />}
-                onClick={() => setShowEventDetail(null)}
+                onClick={() => handleEditClick(showEventDetail)}
               >
                 Edit
               </Button>
