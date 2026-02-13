@@ -13,6 +13,7 @@ export const prisma =
         : ["error"],
   });
 
-if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
+// Cache in ALL environments (Vercel serverless reuses modules in warm lambdas)
+globalForPrisma.prisma = prisma;
 
 export default prisma;

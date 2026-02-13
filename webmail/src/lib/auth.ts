@@ -14,14 +14,24 @@ export const authOptions: NextAuthOptions = {
       async authorize(credentials) {
         try {
           if (!credentials?.email || !credentials?.password) {
+            console.error("[Auth] Missing email or password");
             return null;
           }
 
+          const email = credentials.email.toLowerCase().trim();
+          console.log("[Auth] Login attempt for:", email);
+
           const user = await prisma.user.findUnique({
-            where: { email: credentials.email.toLowerCase().trim() },
+            where: { email },
           });
 
-          if (!user || !user.passwordHash) {
+          if (!user) {
+            console.error("[Auth] User not found:", email);
+            return null;
+          }
+
+          if (!user.passwordHash) {
+            console.error("[Auth] No password hash for:", email);
             return null;
           }
 
@@ -29,9 +39,14 @@ export const authOptions: NextAuthOptions = {
             credentials.password,
             user.passwordHash,
           );
+
           if (!isValid) {
+            console.error("[Auth] Invalid password for:", email);
+            console.error("[Auth] Hash format:", user.passwordHash.substring(0, 20) + "...");
             return null;
           }
+
+          console.log("[Auth] Login successful for:", email);
 
           // Update last login (non-blocking)
           prisma.user
@@ -48,7 +63,7 @@ export const authOptions: NextAuthOptions = {
             image: user.avatar,
           };
         } catch (error) {
-          console.error("Auth error:", error);
+          console.error("[Auth] Database/connection error:", error);
           return null;
         }
       },
