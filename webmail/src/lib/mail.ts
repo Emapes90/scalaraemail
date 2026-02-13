@@ -1,6 +1,6 @@
 import { ImapFlow } from "imapflow";
 import nodemailer from "nodemailer";
-import { simpleParser, ParsedMail } from "mailparser";
+import { simpleParser } from "mailparser";
 import { decrypt } from "@/lib/crypto";
 
 interface MailConfig {
@@ -13,11 +13,18 @@ interface MailConfig {
 }
 
 // ============================================
-// IMAP Client — Fetch Emails
+// IMAP Client — with proper error handling
 // ============================================
 
-export async function createImapClient(config: MailConfig) {
-  const password = decrypt(config.encryptedPassword);
+async function createImapClient(config: MailConfig): Promise<ImapFlow> {
+  let password: string;
+  try {
+    password = decrypt(config.encryptedPassword);
+  } catch (err) {
+    throw new Error(
+      "Failed to decrypt mail password. Please re-enter your mail password in settings.",
+    );
+  }
 
   const client = new ImapFlow({
     host: config.imapHost,
@@ -28,10 +35,42 @@ export async function createImapClient(config: MailConfig) {
       pass: password,
     },
     logger: false,
+    tls: {
+      rejectUnauthorized: false,
+    },
+    connectionTimeout: 15000,
+    greetingTimeout: 15000,
   });
 
-  await client.connect();
+  try {
+    await client.connect();
+  } catch (err: any) {
+    const msg = err?.message || String(err);
+    if (
+      msg.includes("AUTHENTICATIONFAILED") ||
+      msg.includes("Invalid credentials")
+    ) {
+      throw new Error(
+        "Mail authentication failed. Check your email/password in settings.",
+      );
+    }
+    if (msg.includes("ECONNREFUSED") || msg.includes("ETIMEDOUT")) {
+      throw new Error(
+        `Cannot connect to mail server ${config.imapHost}:${config.imapPort}. Check server settings.`,
+      );
+    }
+    throw new Error(`Mail server connection failed: ${msg}`);
+  }
+
   return client;
+}
+
+async function safeLogout(client: ImapFlow) {
+  try {
+    await client.logout();
+  } catch {
+    // Ignore logout errors
+  }
 }
 
 export async function fetchEmails(
@@ -48,6 +87,11 @@ export async function fetchEmails(
     try {
       const messages: any[] = [];
       const total = client.mailbox?.exists || 0;
+
+      if (total === 0) {
+        return { messages: [], total: 0, page, pageSize, hasMore: false };
+      }
+
       const start = Math.max(1, total - page * pageSize + 1);
       const end = Math.max(1, total - (page - 1) * pageSize);
       const range = `${start}:${end}`;
@@ -59,21 +103,34 @@ export async function fetchEmails(
         bodyStructure: true,
         size: true,
       })) {
-        messages.push({
-          uid: message.uid,
-          messageId: message.envelope.messageId,
-          fromAddress: message.envelope.from?.[0]?.address || "",
-          fromName: message.envelope.from?.[0]?.name || null,
-          toAddresses: message.envelope.to?.map((t: any) => t.address) || [],
-          ccAddresses: message.envelope.cc?.map((c: any) => c.address) || [],
-          subject: message.envelope.subject || "(No Subject)",
-          isRead: message.flags.has("\\Seen"),
-          isStarred: message.flags.has("\\Flagged"),
-          hasAttachments: hasAttachmentParts(message.bodyStructure),
-          size: message.size,
-          sentAt: message.envelope.date?.toISOString(),
-          receivedAt: message.envelope.date?.toISOString(),
-        });
+        try {
+          messages.push({
+            id: String(message.uid),
+            uid: message.uid,
+            messageId: message.envelope?.messageId || "",
+            fromAddress: message.envelope?.from?.[0]?.address || "unknown",
+            fromName: message.envelope?.from?.[0]?.name || null,
+            toAddresses:
+              message.envelope?.to
+                ?.map((t: any) => t.address)
+                .filter(Boolean) || [],
+            ccAddresses:
+              message.envelope?.cc
+                ?.map((c: any) => c.address)
+                .filter(Boolean) || [],
+            subject: message.envelope?.subject || "(No Subject)",
+            isRead: message.flags?.has("\\Seen") || false,
+            isStarred: message.flags?.has("\\Flagged") || false,
+            hasAttachments: hasAttachmentParts(message.bodyStructure),
+            size: message.size || 0,
+            sentAt:
+              message.envelope?.date?.toISOString() || new Date().toISOString(),
+            receivedAt:
+              message.envelope?.date?.toISOString() || new Date().toISOString(),
+          });
+        } catch {
+          // Skip malformed messages
+        }
       }
 
       return {
@@ -86,8 +143,16 @@ export async function fetchEmails(
     } finally {
       lock.release();
     }
+  } catch (err: any) {
+    if (
+      err.message?.includes("Mailbox doesn't exist") ||
+      err.message?.includes("NONEXISTENT")
+    ) {
+      return { messages: [], total: 0, page, pageSize, hasMore: false };
+    }
+    throw err;
   } finally {
-    await client.logout();
+    await safeLogout(client);
   }
 }
 
@@ -107,13 +172,15 @@ export async function fetchEmailContent(
       });
       const parsed = await simpleParser(source.content);
 
-      // Mark as read
-      await client.messageFlagsAdd(String(uid), ["\\Seen"], { uid: true });
+      // Mark as read (non-blocking)
+      client
+        .messageFlagsAdd(String(uid), ["\\Seen"], { uid: true })
+        .catch(() => {});
 
       return {
         messageId: parsed.messageId || "",
-        fromAddress: parsed.from?.value[0]?.address || "",
-        fromName: parsed.from?.value[0]?.name || null,
+        fromAddress: parsed.from?.value?.[0]?.address || "unknown",
+        fromName: parsed.from?.value?.[0]?.name || null,
         toAddresses: parsed.to
           ? (Array.isArray(parsed.to) ? parsed.to : [parsed.to]).flatMap((t) =>
               t.value.map((v) => v.address || ""),
@@ -124,7 +191,7 @@ export async function fetchEmailContent(
               c.value.map((v) => v.address || ""),
             )
           : [],
-        replyTo: parsed.replyTo?.value[0]?.address,
+        replyTo: parsed.replyTo?.value?.[0]?.address,
         subject: parsed.subject || "(No Subject)",
         bodyText: parsed.text || null,
         bodyHtml: parsed.html || null,
@@ -135,13 +202,13 @@ export async function fetchEmailContent(
             size: att.size,
             contentId: att.contentId,
           })) || [],
-        sentAt: parsed.date?.toISOString(),
+        sentAt: parsed.date?.toISOString() || new Date().toISOString(),
       };
     } finally {
       lock.release();
     }
   } finally {
-    await client.logout();
+    await safeLogout(client);
   }
 }
 
@@ -160,7 +227,7 @@ export async function moveEmail(
       lock.release();
     }
   } finally {
-    await client.logout();
+    await safeLogout(client);
   }
 }
 
@@ -178,7 +245,7 @@ export async function deleteEmail(
       lock.release();
     }
   } finally {
-    await client.logout();
+    await safeLogout(client);
   }
 }
 
@@ -202,7 +269,7 @@ export async function toggleEmailFlag(
       lock.release();
     }
   } finally {
-    await client.logout();
+    await safeLogout(client);
   }
 }
 
@@ -217,7 +284,7 @@ export async function getFolderList(config: MailConfig) {
       delimiter: folder.delimiter,
     }));
   } finally {
-    await client.logout();
+    await safeLogout(client);
   }
 }
 
@@ -233,7 +300,7 @@ export async function getUnreadCount(
     });
     return { unseen: status.unseen || 0, total: status.messages || 0 };
   } finally {
-    await client.logout();
+    await safeLogout(client);
   }
 }
 
@@ -258,7 +325,12 @@ export async function sendEmail(
     }>;
   },
 ) {
-  const password = decrypt(config.encryptedPassword);
+  let password: string;
+  try {
+    password = decrypt(config.encryptedPassword);
+  } catch {
+    throw new Error("Failed to decrypt mail password.");
+  }
 
   const transporter = nodemailer.createTransport({
     host: config.smtpHost,
@@ -269,27 +341,44 @@ export async function sendEmail(
       pass: password,
     },
     tls: {
-      rejectUnauthorized: process.env.NODE_ENV === "production",
+      rejectUnauthorized: false,
     },
+    connectionTimeout: 15000,
+    greetingTimeout: 15000,
   });
 
-  const info = await transporter.sendMail({
-    from: config.email,
-    to: options.to.join(", "),
-    cc: options.cc?.join(", "),
-    bcc: options.bcc?.join(", "),
-    subject: options.subject,
-    text: options.text,
-    html: options.html,
-    inReplyTo: options.inReplyTo,
-    attachments: options.attachments?.map((att) => ({
-      filename: att.filename,
-      content: att.content,
-      contentType: att.contentType,
-    })),
-  });
+  try {
+    const info = await transporter.sendMail({
+      from: config.email,
+      to: options.to.join(", "),
+      cc: options.cc?.join(", "),
+      bcc: options.bcc?.join(", "),
+      subject: options.subject,
+      text: options.text,
+      html: options.html,
+      inReplyTo: options.inReplyTo,
+      attachments: options.attachments?.map((att) => ({
+        filename: att.filename,
+        content: att.content,
+        contentType: att.contentType,
+      })),
+    });
 
-  return { messageId: info.messageId, accepted: info.accepted };
+    return { messageId: info.messageId, accepted: info.accepted };
+  } catch (err: any) {
+    const msg = err?.message || String(err);
+    if (msg.includes("EAUTH") || msg.includes("Invalid login")) {
+      throw new Error(
+        "SMTP authentication failed. Check your mail credentials.",
+      );
+    }
+    if (msg.includes("ECONNREFUSED") || msg.includes("ETIMEDOUT")) {
+      throw new Error(
+        `Cannot connect to SMTP server ${config.smtpHost}:${config.smtpPort}.`,
+      );
+    }
+    throw new Error(`Failed to send email: ${msg}`);
+  }
 }
 
 // ============================================
@@ -312,7 +401,7 @@ export function mapImapFolderName(slug: string): string {
     drafts: "Drafts",
     trash: "Trash",
     spam: "Junk",
-    starred: "INBOX", // Flagged messages in INBOX
+    starred: "INBOX",
     archive: "Archive",
   };
   return map[slug] || slug;

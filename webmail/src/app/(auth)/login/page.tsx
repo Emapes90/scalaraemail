@@ -1,13 +1,13 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, Suspense } from "react";
 import { signIn } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Mail, Lock, ArrowRight, Shield } from "lucide-react";
 
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const callbackUrl = searchParams.get("callbackUrl") || "/inbox";
@@ -43,6 +43,52 @@ export default function LoginPage() {
   };
 
   return (
+    <div className="bg-scalara-surface border border-scalara-border rounded-2xl p-8 shadow-2xl">
+      <form onSubmit={handleSubmit} className="space-y-5">
+        {error && (
+          <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-sm text-red-400 animate-fade-in">
+            {error}
+          </div>
+        )}
+
+        <Input
+          type="email"
+          placeholder="your@email.com"
+          label="Email Address"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          icon={<Mail className="h-4 w-4" />}
+          required
+          autoFocus
+          autoComplete="email"
+        />
+
+        <Input
+          type="password"
+          placeholder="Enter your password"
+          label="Password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          icon={<Lock className="h-4 w-4" />}
+          required
+          autoComplete="current-password"
+        />
+
+        <Button
+          type="submit"
+          loading={loading}
+          className="w-full h-11 text-base"
+          icon={!loading ? <ArrowRight className="h-4 w-4" /> : undefined}
+        >
+          Sign In
+        </Button>
+      </form>
+    </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
     <div className="min-h-screen flex items-center justify-center bg-scalara-bg px-4">
       {/* Background effects */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none">
@@ -62,48 +108,20 @@ export default function LoginPage() {
           <p className="text-scalara-muted mt-2">Sign in to your mailbox</p>
         </div>
 
-        {/* Login Form */}
-        <div className="bg-scalara-surface border border-scalara-border rounded-2xl p-8 shadow-2xl">
-          <form onSubmit={handleSubmit} className="space-y-5">
-            {error && (
-              <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-sm text-red-400 animate-fade-in">
-                {error}
+        {/* Login Form with Suspense for useSearchParams */}
+        <Suspense
+          fallback={
+            <div className="bg-scalara-surface border border-scalara-border rounded-2xl p-8 shadow-2xl">
+              <div className="animate-pulse space-y-5">
+                <div className="h-10 bg-scalara-hover rounded-lg" />
+                <div className="h-10 bg-scalara-hover rounded-lg" />
+                <div className="h-11 bg-scalara-hover rounded-lg" />
               </div>
-            )}
-
-            <Input
-              type="email"
-              placeholder="your@email.com"
-              label="Email Address"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              icon={<Mail className="h-4 w-4" />}
-              required
-              autoFocus
-              autoComplete="email"
-            />
-
-            <Input
-              type="password"
-              placeholder="Enter your password"
-              label="Password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              icon={<Lock className="h-4 w-4" />}
-              required
-              autoComplete="current-password"
-            />
-
-            <Button
-              type="submit"
-              loading={loading}
-              className="w-full h-11 text-base"
-              icon={!loading ? <ArrowRight className="h-4 w-4" /> : undefined}
-            >
-              Sign In
-            </Button>
-          </form>
-        </div>
+            </div>
+          }
+        >
+          <LoginForm />
+        </Suspense>
 
         {/* Security badge */}
         <div className="flex items-center justify-center gap-2 mt-6 text-scalara-muted">

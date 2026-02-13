@@ -1,7 +1,7 @@
 import { NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import { prisma } from "@/lib/db";
-import bcrypt from "bcryptjs";
+import { verifyPassword } from "@/lib/crypto";
 
 export const authOptions: NextAuthOptions = {
   providers: [
@@ -12,38 +12,45 @@ export const authOptions: NextAuthOptions = {
         password: { label: "Password", type: "password" },
       },
       async authorize(credentials) {
-        if (!credentials?.email || !credentials?.password) {
-          throw new Error("Email and password are required");
+        try {
+          if (!credentials?.email || !credentials?.password) {
+            return null;
+          }
+
+          const user = await prisma.user.findUnique({
+            where: { email: credentials.email.toLowerCase().trim() },
+          });
+
+          if (!user || !user.passwordHash) {
+            return null;
+          }
+
+          const isValid = verifyPassword(
+            credentials.password,
+            user.passwordHash,
+          );
+          if (!isValid) {
+            return null;
+          }
+
+          // Update last login (non-blocking)
+          prisma.user
+            .update({
+              where: { id: user.id },
+              data: { lastLoginAt: new Date() },
+            })
+            .catch(() => {});
+
+          return {
+            id: user.id,
+            email: user.email,
+            name: user.name || user.email.split("@")[0],
+            image: user.avatar,
+          };
+        } catch (error) {
+          console.error("Auth error:", error);
+          return null;
         }
-
-        const user = await prisma.user.findUnique({
-          where: { email: credentials.email },
-        });
-
-        if (!user) {
-          throw new Error("Invalid email or password");
-        }
-
-        const isValid = await bcrypt.compare(
-          credentials.password,
-          user.passwordHash,
-        );
-        if (!isValid) {
-          throw new Error("Invalid email or password");
-        }
-
-        // Update last login
-        await prisma.user.update({
-          where: { id: user.id },
-          data: { lastLoginAt: new Date() },
-        });
-
-        return {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-          image: user.avatar,
-        };
       },
     }),
   ],

@@ -2,8 +2,10 @@ import crypto from "crypto";
 
 const ALGORITHM = "aes-256-gcm";
 const IV_LENGTH = 16;
-const TAG_LENGTH = 16;
 const SALT_LENGTH = 32;
+const PBKDF2_ITERATIONS = 100000;
+const PBKDF2_KEYLEN = 64;
+const PBKDF2_DIGEST = "sha512";
 
 function getKey(): Buffer {
   const key = process.env.ENCRYPTION_KEY;
@@ -42,15 +44,33 @@ export function decrypt(encryptedText: string): string {
 
 export function hashPassword(password: string): string {
   const salt = crypto.randomBytes(SALT_LENGTH);
-  const hash = crypto.pbkdf2Sync(password, salt, 100000, 64, "sha512");
+  const hash = crypto.pbkdf2Sync(
+    password,
+    salt,
+    PBKDF2_ITERATIONS,
+    PBKDF2_KEYLEN,
+    PBKDF2_DIGEST,
+  );
   return `${salt.toString("hex")}:${hash.toString("hex")}`;
 }
 
 export function verifyPassword(password: string, stored: string): boolean {
-  const [saltHex, hashHex] = stored.split(":");
-  const salt = Buffer.from(saltHex, "hex");
-  const hash = crypto.pbkdf2Sync(password, salt, 100000, 64, "sha512");
-  return hash.toString("hex") === hashHex;
+  try {
+    const parts = stored.split(":");
+    if (parts.length !== 2) return false;
+    const [saltHex, hashHex] = parts;
+    const salt = Buffer.from(saltHex, "hex");
+    const hash = crypto.pbkdf2Sync(
+      password,
+      salt,
+      PBKDF2_ITERATIONS,
+      PBKDF2_KEYLEN,
+      PBKDF2_DIGEST,
+    );
+    return crypto.timingSafeEqual(hash, Buffer.from(hashHex, "hex"));
+  } catch {
+    return false;
+  }
 }
 
 export function generateSecureToken(length: number = 32): string {

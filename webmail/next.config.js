@@ -11,6 +11,9 @@ const nextConfig = {
       },
     ],
   },
+  experimental: {
+    serverComponentsExternalPackages: ["imapflow", "nodemailer", "mailparser"],
+  },
   headers: async () => [
     {
       source: "/:path*",

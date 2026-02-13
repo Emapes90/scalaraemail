@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import bcrypt from "bcryptjs";
+import { hashPassword, verifyPassword } from "@/lib/crypto";
 import { z } from "zod";
 
 const updateSettingsSchema = z.object({
@@ -84,7 +84,7 @@ export async function PUT(request: NextRequest) {
       if (!user)
         return NextResponse.json({ error: "User not found" }, { status: 404 });
 
-      const isValid = await bcrypt.compare(
+      const isValid = verifyPassword(
         validated.currentPassword,
         user.passwordHash,
       );
@@ -95,7 +95,7 @@ export async function PUT(request: NextRequest) {
         );
       }
 
-      const newHash = await bcrypt.hash(validated.newPassword, 12);
+      const newHash = hashPassword(validated.newPassword);
       await prisma.user.update({
         where: { email: session.user.email },
         data: { passwordHash: newHash },
