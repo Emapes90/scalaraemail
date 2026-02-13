@@ -8,8 +8,8 @@ readme_directory = no
 compatibility_level = 3.6
 
 # ─── TLS ─────────────────────────────────────────
-smtpd_tls_cert_file = /etc/ssl/scalara/${MAIL_HOSTNAME}/fullchain.pem
-smtpd_tls_key_file = /etc/ssl/scalara/${MAIL_HOSTNAME}/privkey.pem
+smtpd_tls_cert_file = /etc/letsencrypt/live/${MAIL_HOSTNAME}/fullchain.pem
+smtpd_tls_key_file = /etc/letsencrypt/live/${MAIL_HOSTNAME}/privkey.pem
 smtpd_tls_security_level = may
 smtpd_tls_auth_only = yes
 smtpd_tls_protocols = !SSLv2, !SSLv3, !TLSv1, !TLSv1.1

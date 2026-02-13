@@ -655,14 +655,14 @@ create_admin_user() {
 setup_initial_ssl() {
     log_step "Generating initial SSL certificate"
 
-    local cert_dir="/etc/ssl/scalara/${MAIL_HOSTNAME}"
+    local cert_dir="/etc/letsencrypt/live/${MAIL_HOSTNAME}"
     mkdir -p "${cert_dir}"
     openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
         -keyout "${cert_dir}/privkey.pem" \
         -out "${cert_dir}/fullchain.pem" \
         -subj "/CN=${MAIL_HOSTNAME}" \
         2>/dev/null
-    log_success "Self-signed cert generated for ${MAIL_HOSTNAME}"
+    log_success "Self-signed cert generated at ${cert_dir}"
 }
 
 # ─── Postfix ─────────────────────────────────────────────────
@@ -711,8 +711,8 @@ append_dot_mydomain = no
 readme_directory = no
 compatibility_level = 3.6
 
-smtpd_tls_cert_file = /etc/ssl/scalara/${MAIL_HOSTNAME}/fullchain.pem
-smtpd_tls_key_file = /etc/ssl/scalara/${MAIL_HOSTNAME}/privkey.pem
+smtpd_tls_cert_file = /etc/letsencrypt/live/${MAIL_HOSTNAME}/fullchain.pem
+smtpd_tls_key_file = /etc/letsencrypt/live/${MAIL_HOSTNAME}/privkey.pem
 smtpd_tls_security_level = may
 smtpd_tls_auth_only = yes
 smtpd_tls_protocols = !SSLv2, !SSLv3, !TLSv1, !TLSv1.1
@@ -801,8 +801,8 @@ EOF
 
     cat > /etc/dovecot/conf.d/10-ssl.conf << EOF
 ssl = yes
-ssl_cert = </etc/ssl/scalara/${MAIL_HOSTNAME}/fullchain.pem
-ssl_key = </etc/ssl/scalara/${MAIL_HOSTNAME}/privkey.pem
+ssl_cert = </etc/letsencrypt/live/${MAIL_HOSTNAME}/fullchain.pem
+ssl_key = </etc/letsencrypt/live/${MAIL_HOSTNAME}/privkey.pem
 ssl_min_protocol = TLSv1.2
 ssl_prefer_server_ciphers = yes
 EOF
