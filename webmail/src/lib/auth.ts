@@ -42,7 +42,10 @@ export const authOptions: NextAuthOptions = {
 
           if (!isValid) {
             console.error("[Auth] Invalid password for:", email);
-            console.error("[Auth] Hash format:", user.passwordHash.substring(0, 20) + "...");
+            console.error(
+              "[Auth] Hash format:",
+              user.passwordHash.substring(0, 20) + "...",
+            );
             return null;
           }
 

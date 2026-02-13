@@ -5,7 +5,11 @@ export async function GET() {
   const checks: Record<string, any> = {
     timestamp: new Date().toISOString(),
     env: {
-      DATABASE_URL: process.env.DATABASE_URL ? "SET (" + process.env.DATABASE_URL.replace(/\/\/.*:.*@/, "//***:***@") + ")" : "MISSING",
+      DATABASE_URL: process.env.DATABASE_URL
+        ? "SET (" +
+          process.env.DATABASE_URL.replace(/\/\/.*:.*@/, "//***:***@") +
+          ")"
+        : "MISSING",
       NEXTAUTH_URL: process.env.NEXTAUTH_URL || "MISSING",
       NEXTAUTH_SECRET: process.env.NEXTAUTH_SECRET ? "SET" : "MISSING",
       ENCRYPTION_KEY: process.env.ENCRYPTION_KEY ? "SET" : "MISSING",

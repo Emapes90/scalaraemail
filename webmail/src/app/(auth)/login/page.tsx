@@ -31,9 +31,12 @@ function LoginForm() {
 
       if (result?.error) {
         setError("Invalid email or password");
+      } else if (result?.ok) {
+        // Hard redirect — router.push can silently fail with App Router after signIn
+        window.location.href = callbackUrl;
+        return;
       } else {
-        router.push(callbackUrl);
-        router.refresh();
+        setError("Login failed. Please try again.");
       }
     } catch (err) {
       setError("An unexpected error occurred");

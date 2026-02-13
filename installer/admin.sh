@@ -58,11 +58,16 @@ print_header() {
     echo -e "${WHITE}${BOLD}"
     echo "╔══════════════════════════════════════════════╗"
     echo "║         Scalara Admin Panel                  ║"
-    echo "║         Email Hosting Management             ║"
+    echo "║         Business Email Management            ║"
     echo "╚══════════════════════════════════════════════╝"
     echo -e "${NC}"
-    echo -e "  Domain: ${GREEN}${MAIL_DOMAIN}${NC}"
     echo -e "  Server: ${GREEN}${MAIL_HOSTNAME}${NC}"
+    echo -e "  Domains:"
+    get_domains | while read -r d; do
+        local count
+        count=$(db_query "SELECT COUNT(*) FROM users WHERE email LIKE '%@${d}';" 2>/dev/null || echo "0")
+        echo -e "    ${GREEN}${d}${NC}  (${count} accounts)"
+    done
     echo ""
 }
 
@@ -93,6 +98,7 @@ print_menu() {
     echo -e "    ${GREEN}15${NC} Test Email Sending"
     echo -e "    ${GREEN}16${NC} Add New Domain"
     echo -e "    ${GREEN}17${NC} Show Webmail Env Vars"
+    echo -e "    ${GREEN}18${NC} List Domains"
     echo ""
     echo -e "    ${RED}0${NC}   Exit"
     echo ""
@@ -140,9 +146,56 @@ print(iv.hex() + ':' + auth_tag.hex() + ':' + ciphertext.hex())
 "
 }
 
+# ─── Helper: List configured domains ────────────────────────
+get_domains() {
+    if [[ -f /etc/postfix/virtual_mailbox_domains ]]; then
+        cat /etc/postfix/virtual_mailbox_domains | grep -v '^#' | grep -v '^$' | sort -u
+    else
+        echo "${MAIL_DOMAIN}"
+    fi
+}
+
+select_domain() {
+    local domains
+    mapfile -t domains < <(get_domains)
+    local count=${#domains[@]}
+
+    if [[ ${count} -eq 0 ]]; then
+        echo "${MAIL_DOMAIN}"
+        return
+    fi
+
+    if [[ ${count} -eq 1 ]]; then
+        echo -e "  ${WHITE}Domain: ${GREEN}${domains[0]}${NC}"
+        echo "${domains[0]}"
+        return
+    fi
+
+    echo -e "  ${WHITE}Available domains:${NC}" >&2
+    local i=1
+    for d in "${domains[@]}"; do
+        echo -e "    ${GREEN}${i}${NC}  ${d}" >&2
+        ((i++))
+    done
+    echo "" >&2
+
+    local choice
+    read -rp "$(echo -e "${WHITE}Select domain [1-${count}]:${NC} ")" choice
+    if [[ -z "${choice}" || "${choice}" -lt 1 || "${choice}" -gt ${count} ]] 2>/dev/null; then
+        echo "${domains[0]}"
+    else
+        echo "${domains[$((choice-1))]}"
+    fi
+}
+
 # ─── 1. Create Email Account ────────────────────────────────
 create_email() {
     echo -e "\n${CYAN}${BOLD}━━━ Create Email Account ━━━${NC}\n"
+
+    # Select domain
+    local domain
+    domain=$(select_domain)
+    echo -e "  ${WHITE}Using domain: ${GREEN}${domain}${NC}\n"
 
     read -rp "$(echo -e "${WHITE}Email username (before @):${NC} ")" username
     if [[ -z "${username}" ]]; then
@@ -151,7 +204,7 @@ create_email() {
     fi
 
     username=$(echo "${username}" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9._-')
-    local email="${username}@${MAIL_DOMAIN}"
+    local email="${username}@${domain}"
 
     local exists
     exists=$(db_query "SELECT COUNT(*) FROM users WHERE email='${email}';")
@@ -171,7 +224,7 @@ create_email() {
     done
 
     # Create maildir
-    local maildir="/var/mail/vhosts/${MAIL_DOMAIN}/${username}"
+    local maildir="/var/mail/vhosts/${domain}/${username}"
     mkdir -p "${maildir}"/{cur,new,tmp}
     mkdir -p "${maildir}"/.Sent/{cur,new,tmp}
     mkdir -p "${maildir}"/.Drafts/{cur,new,tmp}
@@ -182,8 +235,10 @@ create_email() {
     chmod -R 700 "${maildir}"
 
     # Add to virtual mailbox maps
-    echo "${email}    ${MAIL_DOMAIN}/${username}/" >> /etc/postfix/virtual_mailbox_maps 2>/dev/null || true
-    postmap /etc/postfix/virtual_mailbox_maps 2>/dev/null || true
+    if ! grep -q "^${email}" /etc/postfix/virtual_mailbox_maps 2>/dev/null; then
+        echo "${email}    ${domain}/${username}/" >> /etc/postfix/virtual_mailbox_maps
+        postmap /etc/postfix/virtual_mailbox_maps 2>/dev/null || true
+    fi
 
     # Add to Dovecot users (passwd-file)
     local dovecot_pass
@@ -227,6 +282,7 @@ create_email() {
     echo -e "\n${GREEN}${BOLD}✓ Email account created!${NC}"
     echo -e "  Email:    ${GREEN}${email}${NC}"
     echo -e "  Name:     ${GREEN}${display_name}${NC}"
+    echo -e "  Domain:   ${GREEN}${domain}${NC}"
     echo -e "  IMAP:     ${GREEN}${MAIL_HOSTNAME}:993 (SSL)${NC}"
     echo -e "  SMTP:     ${GREEN}${MAIL_HOSTNAME}:587 (STARTTLS)${NC}"
 }
@@ -241,13 +297,14 @@ delete_email() {
     done
     echo ""
 
-    read -rp "$(echo -e "${WHITE}Email to delete:${NC} ")" email
+    read -rp "$(echo -e "${WHITE}Email to delete (full address):${NC} ")" email
     if [[ -z "${email}" ]]; then
         echo -e "${RED}Email cannot be empty${NC}"
         return
     fi
     if [[ "${email}" != *@* ]]; then
-        email="${email}@${MAIL_DOMAIN}"
+        echo -e "${YELLOW}Please enter the full email address (user@domain.com)${NC}"
+        return
     fi
 
     local exists
@@ -266,6 +323,9 @@ delete_email() {
     local username
     username=$(echo "${email}" | cut -d@ -f1)
 
+    local domain
+    domain=$(echo "${email}" | cut -d@ -f2)
+
     db_query "DELETE FROM users WHERE email='${email}';" 2>/dev/null || true
 
     if [[ -f /etc/dovecot/users ]]; then
@@ -279,7 +339,7 @@ delete_email() {
 
     read -rp "$(echo -e "${YELLOW}Delete mailbox data too? (yes/no):${NC} ")" del_mail
     if [[ "${del_mail}" == "yes" ]]; then
-        rm -rf "/var/mail/vhosts/${MAIL_DOMAIN}/${username}"
+        rm -rf "/var/mail/vhosts/${domain}/${username}"
         echo -e "${GREEN}Mailbox data deleted${NC}"
     fi
 
@@ -293,38 +353,54 @@ delete_email() {
 list_emails() {
     echo -e "\n${CYAN}${BOLD}━━━ Email Accounts ━━━${NC}\n"
 
-    echo -e "${WHITE}${BOLD}  Email                          Name                  Last Login${NC}"
-    echo -e "  ──────────────────────────────  ────────────────────  ──────────────────"
+    # Group by domain
+    local domains
+    mapfile -t domains < <(get_domains)
 
-    db_query "SELECT email, COALESCE(name, '-'), COALESCE(TO_CHAR(last_login_at, 'YYYY-MM-DD HH24:MI'), 'Never') FROM users ORDER BY email;" | while IFS='|' read -r email name last_login; do
-        printf "  ${GREEN}%-30s${NC}  %-20s  %s\n" "${email}" "${name}" "${last_login}"
+    for domain in "${domains[@]}"; do
+        local domain_count
+        domain_count=$(db_query "SELECT COUNT(*) FROM users WHERE email LIKE '%@${domain}';")
+        echo -e "  ${CYAN}${BOLD}@${domain}${NC}  (${domain_count} accounts)"
+        echo -e "  ${WHITE}${BOLD}  Email                          Name                  Last Login${NC}"
+        echo -e "    ──────────────────────────────  ────────────────────  ──────────────────"
+
+        db_query "SELECT email, COALESCE(name, '-'), COALESCE(TO_CHAR(last_login_at, 'YYYY-MM-DD HH24:MI'), 'Never') FROM users WHERE email LIKE '%@${domain}' ORDER BY email;" | while IFS='|' read -r email name last_login; do
+            printf "    ${GREEN}%-30s${NC}  %-20s  %s\n" "${email}" "${name}" "${last_login}"
+        done
+        echo ""
     done
 
     local total
     total=$(db_query "SELECT COUNT(*) FROM users;")
-    echo ""
-    echo -e "  ${WHITE}Total accounts: ${GREEN}${total}${NC}"
+    echo -e "  ${WHITE}Total accounts (all domains): ${GREEN}${total}${NC}"
 
     echo ""
     echo -e "${WHITE}${BOLD}  Mailbox Sizes:${NC}"
-    if [[ -d "/var/mail/vhosts/${MAIL_DOMAIN}" ]]; then
-        du -sh "/var/mail/vhosts/${MAIL_DOMAIN}"/*/ 2>/dev/null | while read -r size dir; do
-            local user
-            user=$(basename "${dir}")
-            printf "  ${GREEN}%-30s${NC}  %s\n" "${user}@${MAIL_DOMAIN}" "${size}"
-        done
-    else
-        echo -e "  ${YELLOW}No mailboxes found${NC}"
-    fi
+    for domain in "${domains[@]}"; do
+        if [[ -d "/var/mail/vhosts/${domain}" ]]; then
+            du -sh "/var/mail/vhosts/${domain}"/*/ 2>/dev/null | while read -r size dir; do
+                local user
+                user=$(basename "${dir}")
+                printf "  ${GREEN}%-30s${NC}  %s\n" "${user}@${domain}" "${size}"
+            done
+        fi
+    done
 }
 
 # ─── 4. Change Email Password ───────────────────────────────
 change_password() {
     echo -e "\n${CYAN}${BOLD}━━━ Change Email Password ━━━${NC}\n"
 
+    echo -e "${WHITE}Existing accounts:${NC}"
+    db_query "SELECT email FROM users ORDER BY email;" | while read -r e; do
+        echo -e "  ${GREEN}${e}${NC}"
+    done
+    echo ""
+
     read -rp "$(echo -e "${WHITE}Email address:${NC} ")" email
     if [[ "${email}" != *@* ]]; then
-        email="${email}@${MAIL_DOMAIN}"
+        echo -e "${YELLOW}Please enter the full email address (user@domain.com)${NC}"
+        return
     fi
 
     local exists
@@ -382,10 +458,16 @@ change_password() {
 change_quota() {
     echo -e "\n${CYAN}${BOLD}━━━ Change Email Quota ━━━${NC}\n"
 
-    read -rp "$(echo -e "${WHITE}Email address:${NC} ")" email
+    read -rp "$(echo -e "${WHITE}Email address (full):${NC} ")" email
     if [[ "${email}" != *@* ]]; then
-        email="${email}@${MAIL_DOMAIN}"
+        echo -e "${YELLOW}Please enter the full email address (user@domain.com)${NC}"
+        return
     fi
+
+    local username
+    username=$(echo "${email}" | cut -d@ -f1)
+    local domain
+    domain=$(echo "${email}" | cut -d@ -f2)
 
     echo -e "${WHITE}Quota plugin status:${NC}"
     if grep -q "quota" /etc/dovecot/conf.d/*.conf 2>/dev/null; then
@@ -396,9 +478,7 @@ change_quota() {
         echo -e "  ${CYAN}plugin { quota = maildir:User quota; quota_rule = *:storage=1G }${NC}"
     fi
 
-    local username
-    username=$(echo "${email}" | cut -d@ -f1)
-    local maildir="/var/mail/vhosts/${MAIL_DOMAIN}/${username}"
+    local maildir="/var/mail/vhosts/${domain}/${username}"
     if [[ -d "${maildir}" ]]; then
         local size
         size=$(du -sh "${maildir}" 2>/dev/null | awk '{print $1}')
@@ -499,23 +579,37 @@ show_dns() {
     local server_ip
     server_ip=$(curl -4 -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
 
-    echo -e "${WHITE}${BOLD}Add these records to Cloudflare / your registrar:${NC}\n"
+    local domains
+    mapfile -t domains < <(get_domains)
 
-    echo -e "  ${CYAN}Type   Host                               Value${NC}"
-    echo -e "  ────── ──────────────────────────────────── ────────────────────────────────────────"
-    echo -e "  ${GREEN}A${NC}      ${MAIL_HOSTNAME}                ${server_ip}"
-    echo -e "  ${GREEN}MX${NC}     ${MAIL_DOMAIN}                     ${MAIL_HOSTNAME} (Priority: 10)"
-    echo -e "  ${GREEN}TXT${NC}    ${MAIL_DOMAIN}                     \"v=spf1 mx a:${MAIL_HOSTNAME} ~all\""
-    echo -e "  ${GREEN}TXT${NC}    _dmarc.${MAIL_DOMAIN}              \"v=DMARC1; p=quarantine; rua=mailto:admin@${MAIL_DOMAIN}\""
+    for domain in "${domains[@]}"; do
+        echo -e "${WHITE}${BOLD}══════ ${domain} ══════${NC}\n"
+        echo -e "  ${CYAN}Type   Host                                    Value${NC}"
+        echo -e "  ────── ──────────────────────────────────────── ──────────────────────────────────────"
+        echo -e "  ${GREEN}A${NC}      mail.${domain}                     ${server_ip}  ${YELLOW}(DNS only, no proxy)${NC}"
+        echo -e "  ${GREEN}MX${NC}     ${domain}                              mail.${domain} (Priority: 10)"
+        echo -e "  ${GREEN}TXT${NC}    ${domain}                              \"v=spf1 mx a:mail.${domain} ~all\""
+        echo -e "  ${GREEN}TXT${NC}    _dmarc.${domain}                       \"v=DMARC1; p=quarantine; rua=mailto:postmaster@${domain}\""
 
-    if [[ -f "/etc/opendkim/keys/${MAIL_DOMAIN}/scalara.txt" ]]; then
+        if [[ -f "/etc/opendkim/keys/${domain}/scalara.txt" ]]; then
+            echo ""
+            echo -e "  ${GREEN}TXT${NC}    scalara._domainkey.${domain}"
+            local dkim_value
+            dkim_value=$(cat "/etc/opendkim/keys/${domain}/scalara.txt" 2>/dev/null | tr -d '\n' | sed 's/\s\+/ /g' | sed 's/.*( "\(.*\)".*/\1/' | tr -d '"' | tr -d ' ')
+            if [[ -n "${dkim_value}" ]]; then
+                echo -e "         ${dkim_value}"
+            else
+                echo -e "         $(cat /etc/opendkim/keys/${domain}/scalara.txt 2>/dev/null | tr -d '\n' | sed 's/\s\+/ /g')"
+            fi
+        else
+            echo -e "\n  ${YELLOW}⚠ No DKIM key found for ${domain}${NC}"
+            echo -e "  ${YELLOW}  Run option 16 (Add Domain) to generate DKIM keys${NC}"
+        fi
+
         echo ""
-        echo -e "  ${GREEN}TXT${NC}    scalara._domainkey.${MAIL_DOMAIN}"
-        echo -e "         $(cat /etc/opendkim/keys/${MAIL_DOMAIN}/scalara.txt 2>/dev/null | tr -d '\n' | sed 's/\s\+/ /g')"
-    fi
+    done
 
-    echo ""
-    echo -e "  ${GREEN}PTR${NC}    ${server_ip}                       ${MAIL_HOSTNAME}"
+    echo -e "  ${GREEN}PTR${NC}    ${server_ip}                              ${MAIL_HOSTNAME}"
     echo -e "         ${YELLOW}(Set via VPS provider control panel)${NC}"
 }
 
@@ -531,54 +625,78 @@ verify_dns() {
     local server_ip
     server_ip=$(curl -4 -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
 
-    echo -e "${WHITE}A Record:${NC}"
-    local ip
-    ip=$(dig +short A "${MAIL_HOSTNAME}" 2>/dev/null | head -1)
-    if [[ "${ip}" == "${server_ip}" ]]; then
-        echo -e "  ${GREEN}✓${NC} ${MAIL_HOSTNAME} → ${ip}"
-    elif [[ -n "${ip}" ]]; then
-        echo -e "  ${YELLOW}!${NC} ${MAIL_HOSTNAME} → ${ip} (expected: ${server_ip})"
-    else
-        echo -e "  ${RED}✗${NC} ${MAIL_HOSTNAME} — Not configured"
-    fi
+    local domains
+    mapfile -t domains < <(get_domains)
 
-    echo -e "\n${WHITE}MX Record:${NC}"
-    local mx
-    mx=$(dig +short MX "${MAIL_DOMAIN}" 2>/dev/null | head -1)
-    if [[ -n "${mx}" ]]; then
-        echo -e "  ${GREEN}✓${NC} ${MAIL_DOMAIN} → ${mx}"
-    else
-        echo -e "  ${RED}✗${NC} No MX record"
-    fi
+    for domain in "${domains[@]}"; do
+        echo -e "${WHITE}${BOLD}══════ ${domain} ══════${NC}\n"
 
-    echo -e "\n${WHITE}SPF Record:${NC}"
-    local spf
-    spf=$(dig +short TXT "${MAIL_DOMAIN}" 2>/dev/null | grep "spf")
-    if [[ -n "${spf}" ]]; then
-        echo -e "  ${GREEN}✓${NC} ${spf}"
-    else
-        echo -e "  ${RED}✗${NC} No SPF record"
-    fi
+        local pass=0
+        local fail=0
 
-    echo -e "\n${WHITE}DMARC Record:${NC}"
-    local dmarc
-    dmarc=$(dig +short TXT "_dmarc.${MAIL_DOMAIN}" 2>/dev/null | head -1)
-    if [[ -n "${dmarc}" ]]; then
-        echo -e "  ${GREEN}✓${NC} ${dmarc}"
-    else
-        echo -e "  ${RED}✗${NC} No DMARC record"
-    fi
+        echo -e "${WHITE}A Record:${NC}"
+        local ip
+        ip=$(dig +short A "mail.${domain}" 2>/dev/null | head -1)
+        if [[ "${ip}" == "${server_ip}" ]]; then
+            echo -e "  ${GREEN}✓${NC} mail.${domain} → ${ip}"
+            ((pass++))
+        elif [[ -n "${ip}" ]]; then
+            echo -e "  ${YELLOW}!${NC} mail.${domain} → ${ip} (expected: ${server_ip})"
+            ((fail++))
+        else
+            echo -e "  ${RED}✗${NC} mail.${domain} — Not configured"
+            ((fail++))
+        fi
 
-    echo -e "\n${WHITE}DKIM Record:${NC}"
-    local dkim
-    dkim=$(dig +short TXT "scalara._domainkey.${MAIL_DOMAIN}" 2>/dev/null | head -1)
-    if [[ -n "${dkim}" ]]; then
-        echo -e "  ${GREEN}✓${NC} DKIM found"
-    else
-        echo -e "  ${RED}✗${NC} No DKIM record"
-    fi
+        echo -e "\n${WHITE}MX Record:${NC}"
+        local mx
+        mx=$(dig +short MX "${domain}" 2>/dev/null | head -1)
+        if [[ -n "${mx}" ]]; then
+            echo -e "  ${GREEN}✓${NC} ${domain} → ${mx}"
+            ((pass++))
+        else
+            echo -e "  ${RED}✗${NC} No MX record for ${domain}"
+            ((fail++))
+        fi
 
-    echo -e "\n${WHITE}PTR Record:${NC}"
+        echo -e "\n${WHITE}SPF Record:${NC}"
+        local spf
+        spf=$(dig +short TXT "${domain}" 2>/dev/null | grep "spf")
+        if [[ -n "${spf}" ]]; then
+            echo -e "  ${GREEN}✓${NC} ${spf}"
+            ((pass++))
+        else
+            echo -e "  ${RED}✗${NC} No SPF record for ${domain}"
+            ((fail++))
+        fi
+
+        echo -e "\n${WHITE}DMARC Record:${NC}"
+        local dmarc
+        dmarc=$(dig +short TXT "_dmarc.${domain}" 2>/dev/null | head -1)
+        if [[ -n "${dmarc}" ]]; then
+            echo -e "  ${GREEN}✓${NC} ${dmarc}"
+            ((pass++))
+        else
+            echo -e "  ${RED}✗${NC} No DMARC record for ${domain}"
+            ((fail++))
+        fi
+
+        echo -e "\n${WHITE}DKIM Record:${NC}"
+        local dkim
+        dkim=$(dig +short TXT "scalara._domainkey.${domain}" 2>/dev/null | head -1)
+        if [[ -n "${dkim}" ]]; then
+            echo -e "  ${GREEN}✓${NC} DKIM found"
+            ((pass++))
+        else
+            echo -e "  ${RED}✗${NC} No DKIM record for ${domain}"
+            ((fail++))
+        fi
+
+        echo -e "\n  ${WHITE}Result: ${GREEN}${pass} passed${NC}, ${RED}${fail} failed${NC}"
+        echo ""
+    done
+
+    echo -e "${WHITE}PTR Record (global):${NC}"
     local ptr
     ptr=$(dig +short -x "${server_ip}" 2>/dev/null | head -1)
     if [[ -n "${ptr}" ]]; then
@@ -733,35 +851,133 @@ If you received this, your mail server is working!" | sendmail "${to_email}" 2>&
 add_domain() {
     echo -e "\n${CYAN}${BOLD}━━━ Add New Domain ━━━${NC}\n"
 
-    read -rp "$(echo -e "${WHITE}New domain name:${NC} ")" new_domain
+    echo -e "${WHITE}Currently configured domains:${NC}"
+    get_domains | while read -r d; do
+        echo -e "  ${GREEN}${d}${NC}"
+    done
+    echo ""
+
+    read -rp "$(echo -e "${WHITE}New domain name (e.g. company.com):${NC} ")" new_domain
     if [[ -z "${new_domain}" ]]; then
         echo -e "${RED}Domain cannot be empty${NC}"
         return
     fi
 
-    if ! grep -q "^${new_domain}$" /etc/postfix/virtual_mailbox_domains 2>/dev/null; then
+    # Remove any protocol prefix or trailing slash
+    new_domain=$(echo "${new_domain}" | sed 's|https\?://||' | sed 's|/.*||' | tr '[:upper:]' '[:lower:]')
+
+    if grep -q "^${new_domain}$" /etc/postfix/virtual_mailbox_domains 2>/dev/null; then
+        echo -e "${YELLOW}Domain ${new_domain} already exists in Postfix${NC}"
+    else
         echo "${new_domain}" >> /etc/postfix/virtual_mailbox_domains
         postmap /etc/postfix/virtual_mailbox_domains 2>/dev/null || true
-        echo -e "${GREEN}✓ Domain added to Postfix${NC}"
-    else
-        echo -e "${YELLOW}Domain already exists${NC}"
+        echo -e "${GREEN}✓ Domain added to Postfix virtual domains${NC}"
     fi
 
+    # Create maildir
     mkdir -p "/var/mail/vhosts/${new_domain}"
     chown -R vmail:vmail "/var/mail/vhosts/${new_domain}"
-    postfix reload 2>/dev/null || true
 
+    # ── Generate DKIM keys for this domain ──
+    echo -e "\n${YELLOW}Generating DKIM keys for ${new_domain}...${NC}"
+    mkdir -p "/etc/opendkim/keys/${new_domain}"
+
+    if ! [[ -f "/etc/opendkim/keys/${new_domain}/scalara.private" ]]; then
+        opendkim-genkey -s scalara -d "${new_domain}" -D "/etc/opendkim/keys/${new_domain}" -b 2048 2>/dev/null
+        chown -R opendkim:opendkim "/etc/opendkim/keys/${new_domain}"
+        chmod 600 "/etc/opendkim/keys/${new_domain}/scalara.private"
+        echo -e "${GREEN}✓ DKIM keys generated${NC}"
+    else
+        echo -e "${YELLOW}DKIM keys already exist for ${new_domain}${NC}"
+    fi
+
+    # Add to OpenDKIM config
+    if ! grep -q "${new_domain}" /etc/opendkim/signing.table 2>/dev/null; then
+        echo "*@${new_domain} scalara._domainkey.${new_domain}" >> /etc/opendkim/signing.table
+        echo -e "${GREEN}✓ Added to signing table${NC}"
+    fi
+
+    if ! grep -q "${new_domain}" /etc/opendkim/key.table 2>/dev/null; then
+        echo "scalara._domainkey.${new_domain} ${new_domain}:scalara:/etc/opendkim/keys/${new_domain}/scalara.private" >> /etc/opendkim/key.table
+        echo -e "${GREEN}✓ Added to key table${NC}"
+    fi
+
+    if ! grep -q "${new_domain}" /etc/opendkim/trusted.hosts 2>/dev/null; then
+        echo "${new_domain}" >> /etc/opendkim/trusted.hosts
+        echo -e "${GREEN}✓ Added to trusted hosts${NC}"
+    fi
+
+    # Get SSL cert for the new domain
+    echo ""
+    read -rp "$(echo -e "${WHITE}Get SSL certificate for mail.${new_domain}? (y/n):${NC} ")" get_ssl
+    if [[ "${get_ssl}" == "y" || "${get_ssl}" == "Y" ]]; then
+        echo -e "${YELLOW}Requesting Let's Encrypt certificate...${NC}"
+        certbot certonly --standalone -d "mail.${new_domain}" --non-interactive --agree-tos --email "postmaster@${new_domain}" 2>&1 | tail -5
+        if [[ $? -eq 0 ]]; then
+            echo -e "${GREEN}✓ SSL certificate obtained${NC}"
+        else
+            echo -e "${YELLOW}⚠ SSL failed — make sure DNS A record for mail.${new_domain} points to this server first${NC}"
+        fi
+    fi
+
+    # Reload services
+    postfix reload 2>/dev/null || true
+    systemctl restart opendkim 2>/dev/null || true
+    systemctl reload dovecot 2>/dev/null || true
+
+    # ── Show DNS Configuration ──
     local server_ip
     server_ip=$(curl -4 -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
 
     echo ""
-    echo -e "${WHITE}${BOLD}Add these DNS records for ${new_domain}:${NC}"
-    echo -e "  ${GREEN}A${NC}      mail.${new_domain}        → ${server_ip}"
-    echo -e "  ${GREEN}MX${NC}     ${new_domain}              → mail.${new_domain} (Priority: 10)"
-    echo -e "  ${GREEN}TXT${NC}    ${new_domain}              → \"v=spf1 mx a:mail.${new_domain} ~all\""
-    echo -e "  ${GREEN}TXT${NC}    _dmarc.${new_domain}       → \"v=DMARC1; p=quarantine\""
+    echo -e "${WHITE}${BOLD}╔══════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${WHITE}${BOLD}║         DNS Configuration for ${new_domain}${NC}"
+    echo -e "${WHITE}${BOLD}╚══════════════════════════════════════════════════════════════╝${NC}"
     echo ""
-    echo -e "${GREEN}${BOLD}✓ Domain ${new_domain} added!${NC}"
+    echo -e "  ${CYAN}Add these DNS records in your domain registrar / Cloudflare:${NC}"
+    echo ""
+    echo -e "  ${WHITE}${BOLD}1. A Record (Mail Server)${NC}"
+    echo -e "     Type:  ${GREEN}A${NC}"
+    echo -e "     Host:  ${GREEN}mail.${new_domain}${NC}"
+    echo -e "     Value: ${GREEN}${server_ip}${NC}"
+    echo -e "     Proxy: ${YELLOW}DNS only (gray cloud — do NOT proxy)${NC}"
+    echo ""
+    echo -e "  ${WHITE}${BOLD}2. MX Record (Mail Exchange)${NC}"
+    echo -e "     Type:     ${GREEN}MX${NC}"
+    echo -e "     Host:     ${GREEN}${new_domain}${NC}"
+    echo -e "     Value:    ${GREEN}mail.${new_domain}${NC}"
+    echo -e "     Priority: ${GREEN}10${NC}"
+    echo ""
+    echo -e "  ${WHITE}${BOLD}3. SPF Record (Spam Prevention)${NC}"
+    echo -e "     Type:  ${GREEN}TXT${NC}"
+    echo -e "     Host:  ${GREEN}${new_domain}${NC}"
+    echo -e "     Value: ${GREEN}\"v=spf1 mx a:mail.${new_domain} ~all\"${NC}"
+    echo ""
+    echo -e "  ${WHITE}${BOLD}4. DMARC Record (Email Policy)${NC}"
+    echo -e "     Type:  ${GREEN}TXT${NC}"
+    echo -e "     Host:  ${GREEN}_dmarc.${new_domain}${NC}"
+    echo -e "     Value: ${GREEN}\"v=DMARC1; p=quarantine; rua=mailto:postmaster@${new_domain}\"${NC}"
+    echo ""
+    echo -e "  ${WHITE}${BOLD}5. DKIM Record (Email Signing)${NC}"
+    echo -e "     Type:  ${GREEN}TXT${NC}"
+    echo -e "     Host:  ${GREEN}scalara._domainkey.${new_domain}${NC}"
+    if [[ -f "/etc/opendkim/keys/${new_domain}/scalara.txt" ]]; then
+        echo -e "     Value:"
+        echo -e "     ${GREEN}$(cat /etc/opendkim/keys/${new_domain}/scalara.txt 2>/dev/null | tr -d '\n' | sed 's/\s\+/ /g')${NC}"
+    else
+        echo -e "     Value: ${YELLOW}(DKIM key generation failed — check opendkim)${NC}"
+    fi
+    echo ""
+    echo -e "  ${WHITE}${BOLD}6. PTR Record (Reverse DNS)${NC}"
+    echo -e "     IP:    ${GREEN}${server_ip}${NC}"
+    echo -e "     Value: ${GREEN}mail.${new_domain}${NC}"
+    echo -e "     ${YELLOW}(Set via your VPS provider's control panel)${NC}"
+    echo ""
+    echo -e "${WHITE}${BOLD}══════════════════════════════════════════════════════════════${NC}"
+    echo ""
+    echo -e "${GREEN}${BOLD}✓ Domain ${new_domain} is ready!${NC}"
+    echo -e "  ${WHITE}After adding DNS records, verify with: Option 10 (Verify DNS)${NC}"
+    echo -e "  ${WHITE}Then create email accounts with: Option 1 (Create Email)${NC}"
 }
 
 # ─── 17. Show Webmail Env Vars ──────────────────────────────
@@ -775,6 +991,46 @@ show_webmail_env() {
         echo -e "${YELLOW}webmail.env not found at ${CONFIG_DIR}/webmail.env${NC}"
         echo -e "${WHITE}Re-run the installer to generate it${NC}"
     fi
+}
+
+# ─── 18. List Domains ──────────────────────────────────────
+list_domains() {
+    echo -e "\n${CYAN}${BOLD}━━━ Configured Domains ━━━${NC}\n"
+
+    local server_ip
+    server_ip=$(curl -4 -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
+
+    local domains
+    mapfile -t domains < <(get_domains)
+
+    echo -e "  ${WHITE}${BOLD}Domain                     Accounts   DKIM    SSL${NC}"
+    echo -e "  ─────────────────────────  ────────   ─────   ─────"
+
+    for domain in "${domains[@]}"; do
+        local count
+        count=$(db_query "SELECT COUNT(*) FROM users WHERE email LIKE '%@${domain}';" 2>/dev/null || echo "0")
+
+        local dkim_status="${RED}✗${NC}"
+        if [[ -f "/etc/opendkim/keys/${domain}/scalara.private" ]]; then
+            dkim_status="${GREEN}✓${NC}"
+        fi
+
+        local ssl_status="${RED}✗${NC}"
+        if [[ -d "/etc/letsencrypt/live/mail.${domain}" ]]; then
+            ssl_status="${GREEN}✓${NC}"
+        elif [[ -d "/etc/letsencrypt/live/${MAIL_HOSTNAME}" && "${domain}" == "${MAIL_DOMAIN}" ]]; then
+            ssl_status="${GREEN}✓${NC}"
+        fi
+
+        printf "  ${GREEN}%-25s${NC}  %-8s   %b      %b\n" "${domain}" "${count}" "${dkim_status}" "${ssl_status}"
+    done
+
+    echo ""
+    echo -e "  ${WHITE}Total domains: ${GREEN}${#domains[@]}${NC}"
+    echo ""
+    echo -e "  ${CYAN}To add a new domain: Option 16${NC}"
+    echo -e "  ${CYAN}To show DNS records: Option 9${NC}"
+    echo -e "  ${CYAN}To verify DNS setup: Option 10${NC}"
 }
 
 # ═══════════════════════════════════════════════════════
@@ -805,6 +1061,7 @@ main() {
             15) test_email ;;
             16) add_domain ;;
             17) show_webmail_env ;;
+            18) list_domains ;;
             0)
                 echo -e "\n${GREEN}Goodbye!${NC}\n"
                 exit 0
