@@ -86,7 +86,7 @@ export async function fetchEmails(
 
     try {
       const messages: any[] = [];
-      const total = client.mailbox?.exists || 0;
+      const total = (client.mailbox && client.mailbox.exists) || 0;
 
       if (total === 0) {
         return { messages: [], total: 0, page, pageSize, hasMore: false };
