@@ -856,21 +856,35 @@ EOF
 
     cat > /etc/dovecot/conf.d/10-master.conf << 'EOF'
 service imap-login {
-  inet_listener imap { port = 143 }
-  inet_listener imaps { port = 993; ssl = yes }
+  inet_listener imap {
+    port = 143
+  }
+  inet_listener imaps {
+    port = 993
+    ssl = yes
+  }
 }
 service lmtp {
   unix_listener /var/spool/postfix/private/dovecot-lmtp {
-    mode = 0600; user = postfix; group = postfix
+    mode = 0600
+    user = postfix
+    group = postfix
   }
 }
 service auth {
   unix_listener /var/spool/postfix/private/auth {
-    mode = 0666; user = postfix; group = postfix
+    mode = 0666
+    user = postfix
+    group = postfix
   }
-  unix_listener auth-userdb { mode = 0600; user = vmail }
+  unix_listener auth-userdb {
+    mode = 0600
+    user = vmail
+  }
 }
-service auth-worker { user = vmail }
+service auth-worker {
+  user = vmail
+}
 EOF
 
     chown -R vmail:dovecot /etc/dovecot
