@@ -1,5 +1,6 @@
 import { ImapFlow } from "imapflow";
 import nodemailer from "nodemailer";
+import MailComposer from "nodemailer/lib/mail-composer";
 import { simpleParser } from "mailparser";
 import { decrypt } from "@/lib/crypto";
 
@@ -360,11 +361,12 @@ export async function sendEmail(
   });
 
   try {
-    const info = await transporter.sendMail({
+    // Build raw RFC822 message first (so we can both send AND save to Sent)
+    const mailOptions = {
       from: config.email,
       to: options.to.join(", "),
-      cc: options.cc?.join(", "),
-      bcc: options.bcc?.join(", "),
+      cc: options.cc?.length ? options.cc.join(", ") : undefined,
+      bcc: options.bcc?.length ? options.bcc.join(", ") : undefined,
       subject: options.subject,
       text: options.text,
       html: options.html,
@@ -374,7 +376,43 @@ export async function sendEmail(
         content: att.content,
         contentType: att.contentType,
       })),
-    });
+    };
+
+    const info = await transporter.sendMail(mailOptions);
+
+    // Append sent message to IMAP "Sent" folder so it shows up in webmail
+    try {
+      const composer = new MailComposer({
+        from: config.email,
+        to: options.to.join(", "),
+        cc: options.cc?.length ? options.cc.join(", ") : undefined,
+        subject: options.subject,
+        text: options.text,
+        html: options.html,
+        inReplyTo: options.inReplyTo,
+        messageId: info.messageId,
+        date: new Date(),
+        attachments: options.attachments?.map((att) => ({
+          filename: att.filename,
+          content: att.content,
+          contentType: att.contentType,
+        })),
+      });
+      const rawMessage = await compiler_build(composer);
+
+      const imapClient = await createImapClient(config);
+      try {
+        await imapClient.append("Sent", rawMessage, ["\\Seen"]);
+      } finally {
+        await safeLogout(imapClient);
+      }
+    } catch (appendErr: any) {
+      // Don't fail the send if Sent append fails — email was already sent
+      console.error(
+        "Failed to append to Sent folder:",
+        appendErr?.message || appendErr,
+      );
+    }
 
     return { messageId: info.messageId, accepted: info.accepted };
   } catch (err: any) {
@@ -404,6 +442,17 @@ export async function sendEmail(
 // ============================================
 // Helpers
 // ============================================
+
+function compiler_build(
+  composer: InstanceType<typeof MailComposer>,
+): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    composer.compile().build((err: any, message: Buffer) => {
+      if (err) reject(err);
+      else resolve(message);
+    });
+  });
+}
 
 function hasAttachmentParts(structure: any): boolean {
   if (!structure) return false;
