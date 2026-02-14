@@ -702,6 +702,32 @@ EOF
     log_success "Postfix installed and configured"
 }
 
+# ─── Configure Postfix master.cf submission ──────────────────
+configure_postfix_submission() {
+    log_info "Enabling submission port 587 in master.cf..."
+
+    if ! grep -q "^submission " /etc/postfix/master.cf 2>/dev/null; then
+        cat >> /etc/postfix/master.cf << 'EOF'
+
+# Scalara — Submission port 587 (STARTTLS + SASL auth)
+submission inet n       -       y       -       -       smtpd
+  -o syslog_name=postfix/submission
+  -o smtpd_tls_security_level=encrypt
+  -o smtpd_sasl_auth_enable=yes
+  -o smtpd_tls_auth_only=yes
+  -o smtpd_reject_unlisted_recipient=no
+  -o smtpd_client_restrictions=permit_sasl_authenticated,reject
+  -o smtpd_recipient_restrictions=permit_sasl_authenticated,reject
+  -o milter_macro_daemon_name=ORIGINATING
+EOF
+        log_success "Submission port 587 enabled in master.cf"
+    else
+        log_info "Submission already configured in master.cf"
+    fi
+
+    postfix reload 2>/dev/null || true
+}
+
 configure_postfix_inline() {
     cat > /etc/postfix/main.cf << EOF
 # Scalara Postfix — Generated $(date)
@@ -768,7 +794,6 @@ install_dovecot() {
     cat > /etc/dovecot/conf.d/10-auth.conf << 'EOF'
 disable_plaintext_auth = yes
 auth_mechanisms = plain login
-!include auth-system.conf.ext
 passdb {
   driver = passwd-file
   args = scheme=SHA512-CRYPT /etc/dovecot/users
@@ -1110,6 +1135,7 @@ main() {
     create_database_schema
     setup_initial_ssl
     install_postfix
+    configure_postfix_submission
     install_dovecot
     setup_ssl_certs
     setup_dkim

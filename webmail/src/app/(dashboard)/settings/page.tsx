@@ -62,6 +62,8 @@ export default function SettingsPage() {
   const [mailPasswordInput, setMailPasswordInput] = useState("");
   const [showMailPassword, setShowMailPassword] = useState(false);
   const [savingMailPassword, setSavingMailPassword] = useState(false);
+  const [testingSmtp, setTestingSmtp] = useState(false);
+  const [smtpTestResult, setSmtpTestResult] = useState<any>(null);
 
   useEffect(() => {
     loadSettings();
@@ -180,6 +182,33 @@ export default function SettingsPage() {
       setMessage({ type: "error", text: "Failed to update mail password" });
     } finally {
       setSavingMailPassword(false);
+    }
+  };
+
+  const handleTestSmtp = async () => {
+    setTestingSmtp(true);
+    setSmtpTestResult(null);
+    setMessage(null);
+    try {
+      const res = await fetch("/api/test-smtp");
+      const data = await res.json();
+      setSmtpTestResult(data);
+      if (data.success) {
+        setMessage({
+          type: "success",
+          text: "SMTP connection and authentication successful!",
+        });
+      } else {
+        const failedStep = data.steps?.find((s: any) => s.status === "fail");
+        setMessage({
+          type: "error",
+          text: failedStep?.detail || "SMTP test failed. See details below.",
+        });
+      }
+    } catch {
+      setMessage({ type: "error", text: "Failed to run SMTP test" });
+    } finally {
+      setTestingSmtp(false);
     }
   };
 
@@ -741,6 +770,69 @@ export default function SettingsPage() {
                     Update
                   </Button>
                 </div>
+              </div>
+
+              {/* Test SMTP Connection */}
+              <div className="p-6 rounded-xl bg-scalara-surface border border-scalara-border space-y-4">
+                <h3 className="text-sm font-semibold text-white mb-1 flex items-center gap-2">
+                  <Server className="h-4 w-4" /> Test SMTP Connection
+                </h3>
+                <p className="text-xs text-scalara-muted">
+                  Run a step-by-step SMTP diagnostic to check if email sending
+                  is properly configured.
+                </p>
+                <Button
+                  onClick={handleTestSmtp}
+                  loading={testingSmtp}
+                  variant="secondary"
+                >
+                  {testingSmtp ? "Testing..." : "Run SMTP Test"}
+                </Button>
+
+                {smtpTestResult && (
+                  <div className="space-y-2 mt-3">
+                    {smtpTestResult.steps?.map((step: any, i: number) => (
+                      <div
+                        key={i}
+                        className={`flex items-start gap-2 text-xs p-2 rounded-lg ${
+                          step.status === "pass"
+                            ? "bg-green-500/10 text-green-400"
+                            : step.status === "fail"
+                              ? "bg-red-500/10 text-red-400"
+                              : "bg-yellow-500/10 text-yellow-400"
+                        }`}
+                      >
+                        <span className="mt-0.5">
+                          {step.status === "pass"
+                            ? "✅"
+                            : step.status === "fail"
+                              ? "❌"
+                              : "⏭️"}
+                        </span>
+                        <div>
+                          <span className="font-medium">{step.name}</span>
+                          {step.detail && (
+                            <p className="text-[10px] opacity-80 mt-0.5">
+                              {step.detail}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+
+                    {smtpTestResult.fixCommands &&
+                      smtpTestResult.fixCommands.length > 0 && (
+                        <div className="mt-3 p-3 rounded-lg bg-scalara-card border border-scalara-border">
+                          <p className="text-xs font-semibold text-yellow-400 mb-2">
+                            🔧 VPS Fix Commands (run via SSH as root):
+                          </p>
+                          <pre className="text-[10px] text-scalara-muted whitespace-pre-wrap break-all font-mono bg-black/40 p-2 rounded">
+                            {smtpTestResult.fixCommands.join("\n\n")}
+                          </pre>
+                        </div>
+                      )}
+                  </div>
+                )}
               </div>
 
               <div className="p-4 rounded-xl bg-scalara-card border border-scalara-border">
