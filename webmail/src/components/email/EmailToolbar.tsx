@@ -15,6 +15,7 @@ import {
   Star,
   MoreHorizontal,
   ChevronDown,
+  RefreshCw,
 } from "lucide-react";
 
 interface EmailToolbarProps {
@@ -24,6 +25,8 @@ interface EmailToolbarProps {
   onArchive: () => void;
   onSpam: () => void;
   onStar: () => void;
+  onRefresh?: () => void;
+  refreshing?: boolean;
 }
 
 export function EmailToolbar({
@@ -33,6 +36,8 @@ export function EmailToolbar({
   onArchive,
   onSpam,
   onStar,
+  onRefresh,
+  refreshing,
 }: EmailToolbarProps) {
   const { emails, selectedEmails, selectAllEmails, clearSelection } =
     useMailStore();
@@ -118,9 +123,24 @@ export function EmailToolbar({
           </div>
         </>
       ) : (
-        <span className="text-xs text-scalara-muted ml-2">
-          {emails.length} conversations
-        </span>
+        <div className="flex items-center gap-2 ml-2">
+          <span className="text-xs text-scalara-muted">
+            {emails.length} conversations
+          </span>
+          {onRefresh && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onRefresh}
+              title="Refresh"
+              disabled={refreshing}
+            >
+              <RefreshCw
+                className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`}
+              />
+            </Button>
+          )}
+        </div>
       )}
     </div>
   );

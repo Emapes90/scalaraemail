@@ -784,6 +784,9 @@ install_dovecot() {
 
     cp /etc/dovecot/dovecot.conf /etc/dovecot/dovecot.conf.bak 2>/dev/null || true
 
+    # Remove all conf.d files to avoid conflicts — we use a single dovecot.conf
+    rm -f /etc/dovecot/conf.d/*.conf 2>/dev/null || true
+
     local template="${INSTALLER_DIR}/templates/dovecot.conf"
     if [[ -f "${template}" ]]; then
         envsubst '${MAIL_HOSTNAME} ${MAIL_DOMAIN}' < "${template}" > /etc/dovecot/dovecot.conf
@@ -791,9 +794,35 @@ install_dovecot() {
         configure_dovecot_inline
     fi
 
-    cat > /etc/dovecot/conf.d/10-auth.conf << 'EOF'
+    # Create users file for passwd-file auth
+    touch /etc/dovecot/users
+    chown root:dovecot /etc/dovecot/users
+    chmod 640 /etc/dovecot/users
+
+    chown -R vmail:dovecot /etc/dovecot
+    chmod -R o-rwx /etc/dovecot
+
+    systemctl enable dovecot
+    systemctl restart dovecot 2>/dev/null || log_warn "Dovecot will restart after SSL certs"
+    log_success "Dovecot installed and configured (single-file config)"
+}
+
+configure_dovecot_inline() {
+    cat > /etc/dovecot/dovecot.conf << EOF
+# Scalara Dovecot — inline fallback config
+protocols = imap lmtp
+listen = *, ::
+login_greeting = Scalara Mail Server
+
+ssl = yes
+ssl_cert = </etc/letsencrypt/live/${MAIL_HOSTNAME}/fullchain.pem
+ssl_key = </etc/letsencrypt/live/${MAIL_HOSTNAME}/privkey.pem
+ssl_min_protocol = TLSv1.2
+ssl_prefer_server_ciphers = yes
+
 disable_plaintext_auth = yes
 auth_mechanisms = plain login
+
 passdb {
   driver = passwd-file
   args = scheme=SHA512-CRYPT /etc/dovecot/users
@@ -802,59 +831,37 @@ userdb {
   driver = static
   args = uid=5000 gid=5000 home=/var/mail/vhosts/%d/%n
 }
-EOF
 
-    touch /etc/dovecot/users
-    chown root:dovecot /etc/dovecot/users
-    chmod 640 /etc/dovecot/users
-
-    cat > /etc/dovecot/conf.d/10-mail.conf << 'EOF'
 mail_location = maildir:/var/mail/vhosts/%d/%n
+mail_uid = 5000
+mail_gid = 5000
+mail_privileged_group = vmail
+
 namespace inbox {
   inbox = yes
   separator = /
   mailbox Drafts {
     auto = subscribe
-    special_use = \Drafts
+    special_use = \\Drafts
   }
   mailbox Sent {
     auto = subscribe
-    special_use = \Sent
+    special_use = \\Sent
   }
   mailbox Trash {
     auto = subscribe
-    special_use = \Trash
+    special_use = \\Trash
   }
   mailbox Spam {
     auto = subscribe
-    special_use = \Junk
+    special_use = \\Junk
   }
   mailbox Archive {
     auto = subscribe
-    special_use = \Archive
+    special_use = \\Archive
   }
 }
-mail_uid = 5000
-mail_gid = 5000
-mail_privileged_group = vmail
-EOF
 
-    cat > /etc/dovecot/conf.d/10-ssl.conf << EOF
-ssl = yes
-ssl_cert = </etc/letsencrypt/live/${MAIL_HOSTNAME}/fullchain.pem
-ssl_key = </etc/letsencrypt/live/${MAIL_HOSTNAME}/privkey.pem
-ssl_min_protocol = TLSv1.2
-ssl_prefer_server_ciphers = yes
-EOF
-
-    cat > /etc/dovecot/conf.d/20-lmtp.conf << 'EOF'
-protocol lmtp {
-  mail_plugins = $mail_plugins
-  postmaster_address = postmaster@%d
-}
-EOF
-
-    cat > /etc/dovecot/conf.d/10-master.conf << 'EOF'
 service imap-login {
   inet_listener imap {
     port = 143
@@ -864,6 +871,7 @@ service imap-login {
     ssl = yes
   }
 }
+
 service lmtp {
   unix_listener /var/spool/postfix/private/dovecot-lmtp {
     mode = 0600
@@ -871,6 +879,7 @@ service lmtp {
     group = postfix
   }
 }
+
 service auth {
   unix_listener /var/spool/postfix/private/auth {
     mode = 0666
@@ -882,26 +891,21 @@ service auth {
     user = vmail
   }
 }
+
 service auth-worker {
   user = vmail
 }
-EOF
 
-    chown -R vmail:dovecot /etc/dovecot
-    chmod -R o-rwx /etc/dovecot
-
-    systemctl enable dovecot
-    systemctl restart dovecot 2>/dev/null || log_warn "Dovecot will restart after SSL certs"
-    log_success "Dovecot installed and configured"
+protocol imap {
+  mail_max_userip_connections = 20
 }
 
-configure_dovecot_inline() {
-    cat > /etc/dovecot/dovecot.conf << 'EOF'
-protocols = imap lmtp
-listen = *, ::
-login_greeting = Scalara Mail
-!include conf.d/*.conf
-!include_try local.conf
+protocol lmtp {
+  postmaster_address = postmaster@${MAIL_DOMAIN}
+}
+
+log_path = /var/log/dovecot.log
+info_log_path = /var/log/dovecot-info.log
 EOF
 }
 
@@ -942,13 +946,10 @@ setup_ssl_certs() {
 
     if [[ -n "${MAIL_CERT_DIR}" ]]; then
         log_info "Applying Let's Encrypt certs..."
-        cat > /etc/dovecot/conf.d/10-ssl.conf << EOF
-ssl = required
-ssl_cert = <${MAIL_CERT_DIR}/fullchain.pem
-ssl_key = <${MAIL_CERT_DIR}/privkey.pem
-ssl_min_protocol = TLSv1.2
-ssl_prefer_server_ciphers = yes
-EOF
+        # Update dovecot.conf SSL paths directly (single-file config, no conf.d)
+        sed -i "s|ssl_cert = <.*|ssl_cert = <${MAIL_CERT_DIR}/fullchain.pem|" /etc/dovecot/dovecot.conf
+        sed -i "s|ssl_key = <.*|ssl_key = <${MAIL_CERT_DIR}/privkey.pem|" /etc/dovecot/dovecot.conf
+        sed -i "s|^ssl = .*|ssl = required|" /etc/dovecot/dovecot.conf
         postconf -e "smtpd_tls_cert_file = ${MAIL_CERT_DIR}/fullchain.pem"
         postconf -e "smtpd_tls_key_file = ${MAIL_CERT_DIR}/privkey.pem"
     fi

@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { useMailStore } from "@/store/useMailStore";
+import { useToast } from "@/components/ui/Toast";
 import { EmailList } from "@/components/email/EmailList";
 import { EmailView } from "@/components/email/EmailView";
 import { EmailToolbar } from "@/components/email/EmailToolbar";
@@ -16,30 +17,40 @@ export default function TrashPage() {
     setEmails,
     setActiveFolder,
     removeEmails,
+    selectedEmails,
+    clearSelection,
     isLoading,
     setLoading,
     searchQuery,
     setComposing,
   } = useMailStore();
+
+  const toast = useToast();
   const [viewingEmail, setViewingEmail] = useState<Email | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const loadEmails = useCallback(
+    async (silent = false) => {
+      if (!silent) setLoading(true);
+      else setRefreshing(true);
+      try {
+        const res = await fetch("/api/emails?folder=trash&page=1&pageSize=50");
+        const data = await res.json();
+        if (data.success) setEmails(data.data.emails);
+      } catch {
+        if (!silent) toast.error("Failed to load trash");
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    },
+    [setEmails, setLoading, toast],
+  );
 
   useEffect(() => {
     setActiveFolder("trash");
     loadEmails();
   }, []);
-
-  const loadEmails = async () => {
-    setLoading(true);
-    try {
-      const res = await fetch("/api/emails?folder=trash&page=1&pageSize=50");
-      const data = await res.json();
-      if (data.success) setEmails(data.data.emails);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleEmailClick = async (email: Email) => {
     setViewingEmail(email);
@@ -47,42 +58,72 @@ export default function TrashPage() {
       const res = await fetch(`/api/emails/${email.uid}?folder=trash`);
       const data = await res.json();
       if (data.success) setViewingEmail({ ...email, ...data.data });
-    } catch (e) {
-      console.error(e);
+    } catch {
+      toast.error("Failed to load email");
     }
   };
 
   const handleBack = () => setViewingEmail(null);
 
   const handleDelete = async () => {
-    const uid = viewingEmail?.uid;
-    if (!uid) return;
+    const targets = viewingEmail
+      ? [String(viewingEmail.uid)]
+      : Array.from(selectedEmails);
+
+    if (targets.length === 0) {
+      toast.warning("No emails selected");
+      return;
+    }
+
     try {
-      await fetch(`/api/emails/${uid}?folder=trash`, { method: "DELETE" });
-      removeEmails([String(uid)]);
-      handleBack();
-    } catch (e) {
-      console.error(e);
+      await Promise.all(
+        targets.map((uid) =>
+          fetch(`/api/emails/${uid}?folder=trash`, { method: "DELETE" }),
+        ),
+      );
+      removeEmails(targets);
+      clearSelection();
+      if (viewingEmail) handleBack();
+      toast.success(
+        `Permanently deleted ${targets.length > 1 ? targets.length + " emails" : "email"}`,
+      );
+    } catch {
+      toast.error("Failed to delete");
     }
   };
 
   const handleRestore = async () => {
-    const uid = viewingEmail?.uid;
-    if (!uid) return;
+    const targets = viewingEmail
+      ? [String(viewingEmail.uid)]
+      : Array.from(selectedEmails);
+
+    if (targets.length === 0) {
+      toast.warning("No emails selected");
+      return;
+    }
+
     try {
-      await fetch(`/api/emails/${uid}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "move",
-          folder: "trash",
-          targetFolder: "inbox",
-        }),
-      });
-      removeEmails([String(uid)]);
-      handleBack();
-    } catch (e) {
-      console.error(e);
+      await Promise.all(
+        targets.map((uid) =>
+          fetch(`/api/emails/${uid}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              action: "move",
+              folder: "trash",
+              targetFolder: "inbox",
+            }),
+          }),
+        ),
+      );
+      removeEmails(targets);
+      clearSelection();
+      if (viewingEmail) handleBack();
+      toast.success(
+        `Restored ${targets.length > 1 ? targets.length + " emails" : "email"} to inbox`,
+      );
+    } catch {
+      toast.error("Failed to restore");
     }
   };
 
@@ -119,6 +160,7 @@ export default function TrashPage() {
   };
 
   if (isLoading) return <PageLoader />;
+
   if (viewingEmail)
     return (
       <EmailView
@@ -136,6 +178,8 @@ export default function TrashPage() {
   return (
     <div className="flex flex-col h-full">
       <EmailToolbar
+        onRefresh={() => loadEmails(true)}
+        refreshing={refreshing}
         onMarkRead={() => {}}
         onMarkUnread={() => {}}
         onDelete={handleDelete}

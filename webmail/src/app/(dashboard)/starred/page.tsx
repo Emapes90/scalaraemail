@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { useMailStore } from "@/store/useMailStore";
+import { useToast } from "@/components/ui/Toast";
 import { EmailList } from "@/components/email/EmailList";
 import { EmailView } from "@/components/email/EmailView";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -15,41 +16,48 @@ export default function StarredPage() {
     setEmails,
     setActiveFolder,
     removeEmails,
+    updateEmail,
     isLoading,
     setLoading,
     searchQuery,
     setComposing,
   } = useMailStore();
+
+  const toast = useToast();
   const [viewingEmail, setViewingEmail] = useState<Email | null>(null);
+
+  const loadEmails = useCallback(
+    async (silent = false) => {
+      if (!silent) setLoading(true);
+      try {
+        const res = await fetch(
+          "/api/emails?folder=starred&page=1&pageSize=50",
+        );
+        const data = await res.json();
+        if (data.success)
+          setEmails(data.data.emails.filter((e: any) => e.isStarred));
+      } catch {
+        if (!silent) toast.error("Failed to load starred emails");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [setEmails, setLoading, toast],
+  );
 
   useEffect(() => {
     setActiveFolder("starred");
     loadEmails();
   }, []);
 
-  const loadEmails = async () => {
-    setLoading(true);
-    try {
-      const res = await fetch("/api/emails?folder=starred&page=1&pageSize=50");
-      const data = await res.json();
-      if (data.success)
-        setEmails(data.data.emails.filter((e: any) => e.isStarred));
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handleEmailClick = async (email: Email) => {
     setViewingEmail(email);
     try {
-      // Starred emails could be from any folder, try INBOX first
       const res = await fetch(`/api/emails/${email.uid}?folder=starred`);
       const data = await res.json();
       if (data.success) setViewingEmail({ ...email, ...data.data });
-    } catch (e) {
-      console.error(e);
+    } catch {
+      toast.error("Failed to load email");
     }
   };
 
@@ -67,13 +75,31 @@ export default function StarredPage() {
       if (action === "unstar") {
         removeEmails([String(uid)]);
         handleBack();
+        toast.success("Unstarred");
       }
       if (["trash", "archive"].includes(action)) {
         removeEmails([String(uid)]);
         handleBack();
+        toast.success(action === "trash" ? "Deleted" : "Archived");
       }
-    } catch (e) {
-      console.error(e);
+    } catch {
+      toast.error(`Failed to ${action}`);
+    }
+  };
+
+  const handleStarToggle = async (email: Email) => {
+    updateEmail(email.id, { isStarred: false });
+    try {
+      await fetch(`/api/emails/${email.uid}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "unstar", folder: "starred" }),
+      });
+      removeEmails([email.id]);
+      toast.success("Unstarred");
+    } catch {
+      updateEmail(email.id, { isStarred: true });
+      toast.error("Failed to unstar");
     }
   };
 
@@ -125,6 +151,7 @@ export default function StarredPage() {
     : emails;
 
   if (isLoading) return <PageLoader />;
+
   if (viewingEmail)
     return (
       <EmailView
@@ -148,7 +175,11 @@ export default function StarredPage() {
           description="Star messages to find them easily later."
         />
       ) : (
-        <EmailList emails={filteredEmails} onEmailClick={handleEmailClick} />
+        <EmailList
+          emails={filteredEmails}
+          onEmailClick={handleEmailClick}
+          onStarToggle={handleStarToggle}
+        />
       )}
     </div>
   );

@@ -3,30 +3,21 @@
 import React, { useState, useRef, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import { useMailStore } from "@/store/useMailStore";
+import { useToast } from "@/components/ui/Toast";
 import { Button } from "@/components/ui/Button";
-import { Input } from "@/components/ui/Input";
-import { Modal } from "@/components/ui/Modal";
 import {
   X,
   Send,
   Paperclip,
-  Bold,
-  Italic,
-  Underline,
-  List,
-  ListOrdered,
-  Link,
-  Image,
   Minimize2,
   Maximize2,
   Trash2,
-  ChevronDown,
-  ChevronUp,
   AlertCircle,
 } from "lucide-react";
 
 export function ComposeModal() {
   const { isComposing, composeData, setComposing } = useMailStore();
+  const toast = useToast();
   const [to, setTo] = useState("");
   const [cc, setCc] = useState("");
   const [bcc, setBcc] = useState("");
@@ -40,7 +31,6 @@ export function ComposeModal() {
   const [attachments, setAttachments] = useState<File[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Sync composeData to local state when opening (Reply/Forward/New)
   useEffect(() => {
     if (isComposing && composeData) {
       setTo(composeData.to?.join(", ") || "");
@@ -62,6 +52,16 @@ export function ComposeModal() {
   }, [isComposing, composeData]);
 
   if (!isComposing) return null;
+
+  const resetForm = () => {
+    setTo("");
+    setCc("");
+    setBcc("");
+    setSubject("");
+    setBody("");
+    setAttachments([]);
+    setSendError(null);
+  };
 
   const handleSend = async () => {
     if (!to.trim()) {
@@ -108,29 +108,32 @@ export function ComposeModal() {
       const data = await response.json();
 
       if (response.ok && data.success) {
+        resetForm();
         setComposing(false);
-        setTo("");
-        setCc("");
-        setBcc("");
-        setSubject("");
-        setBody("");
-        setAttachments([]);
+        toast.success("Email sent successfully!");
+        window.dispatchEvent(new CustomEvent("scalara:refresh-emails"));
       } else {
         setSendError(data.error || "Failed to send email. Please try again.");
+        toast.error(data.error || "Failed to send email");
       }
     } catch (error) {
       console.error("Failed to send email:", error);
       setSendError(
         "Network error. Please check your connection and try again.",
       );
+      toast.error("Network error. Could not send email.");
     } finally {
       setIsSending(false);
     }
   };
 
-  const handleAttachFile = () => {
-    fileInputRef.current?.click();
+  const handleDiscard = () => {
+    resetForm();
+    setComposing(false);
+    toast.info("Draft discarded");
   };
+
+  const handleAttachFile = () => fileInputRef.current?.click();
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
@@ -199,7 +202,6 @@ export function ComposeModal() {
             </button>
           </div>
         </div>
-
         {showCc && (
           <div className="flex items-center gap-2 border-t border-scalara-border/50">
             <span className="text-xs text-scalara-muted w-10 shrink-0">Cc</span>
@@ -212,7 +214,6 @@ export function ComposeModal() {
             />
           </div>
         )}
-
         {showBcc && (
           <div className="flex items-center gap-2 border-t border-scalara-border/50">
             <span className="text-xs text-scalara-muted w-10 shrink-0">
@@ -227,7 +228,6 @@ export function ComposeModal() {
             />
           </div>
         )}
-
         <div className="flex items-center gap-2 border-t border-scalara-border/50">
           <span className="text-xs text-scalara-muted w-10 shrink-0">Sub</span>
           <input
@@ -240,7 +240,7 @@ export function ComposeModal() {
         </div>
       </div>
 
-      {/* Error Message */}
+      {/* Error */}
       {sendError && (
         <div className="mx-4 mt-2 p-2 rounded-lg bg-red-500/10 border border-red-500/20 flex items-center gap-2">
           <AlertCircle className="h-4 w-4 text-red-400 shrink-0" />
@@ -254,7 +254,7 @@ export function ComposeModal() {
         </div>
       )}
 
-      {/* Body Editor */}
+      {/* Body */}
       <div className="flex-1 overflow-y-auto custom-scrollbar">
         <textarea
           value={body}
@@ -264,7 +264,7 @@ export function ComposeModal() {
         />
       </div>
 
-      {/* Attachments Preview */}
+      {/* Attachments */}
       {attachments.length > 0 && (
         <div className="px-4 py-2 border-t border-scalara-border flex flex-wrap gap-2">
           {attachments.map((file, index) => (
@@ -290,26 +290,6 @@ export function ComposeModal() {
       {/* Toolbar */}
       <div className="flex items-center justify-between px-4 py-3 border-t border-scalara-border">
         <div className="flex items-center gap-0.5">
-          {/* Formatting buttons */}
-          {[
-            { icon: Bold, label: "Bold" },
-            { icon: Italic, label: "Italic" },
-            { icon: Underline, label: "Underline" },
-            { icon: List, label: "Bullet List" },
-            { icon: ListOrdered, label: "Numbered List" },
-            { icon: Link, label: "Insert Link" },
-          ].map(({ icon: Icon, label }) => (
-            <button
-              key={label}
-              title={label}
-              className="p-1.5 rounded text-scalara-muted hover:text-white hover:bg-scalara-hover transition-colors"
-            >
-              <Icon className="h-4 w-4" />
-            </button>
-          ))}
-
-          <div className="w-px h-5 bg-scalara-border mx-1" />
-
           <button
             onClick={handleAttachFile}
             title="Attach File"
@@ -317,7 +297,6 @@ export function ComposeModal() {
           >
             <Paperclip className="h-4 w-4" />
           </button>
-
           <input
             ref={fileInputRef}
             type="file"
@@ -326,12 +305,11 @@ export function ComposeModal() {
             onChange={handleFileChange}
           />
         </div>
-
         <div className="flex items-center gap-2">
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => setComposing(false)}
+            onClick={handleDiscard}
             icon={<Trash2 className="h-3.5 w-3.5" />}
           >
             Discard

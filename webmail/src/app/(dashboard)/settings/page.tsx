@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
+import { useToast } from "@/components/ui/Toast";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Textarea } from "@/components/ui/Input";
@@ -16,7 +17,6 @@ import {
   Key,
   Save,
   RefreshCw,
-  Server,
   Eye,
   EyeOff,
 } from "lucide-react";
@@ -41,7 +41,7 @@ const sections: SettingsSection[] = [
     icon: <Palette className="h-4 w-4" />,
   },
   { id: "mail", label: "Mail Settings", icon: <Mail className="h-4 w-4" /> },
-  { id: "server", label: "Server", icon: <Server className="h-4 w-4" /> },
+  { id: "account", label: "Mail Account", icon: <Key className="h-4 w-4" /> },
 ];
 
 export default function SettingsPage() {
@@ -55,15 +55,10 @@ export default function SettingsPage() {
     confirmPassword: "",
   });
   const [showPassword, setShowPassword] = useState(false);
-  const [message, setMessage] = useState<{
-    type: "success" | "error";
-    text: string;
-  } | null>(null);
   const [mailPasswordInput, setMailPasswordInput] = useState("");
   const [showMailPassword, setShowMailPassword] = useState(false);
   const [savingMailPassword, setSavingMailPassword] = useState(false);
-  const [testingSmtp, setTestingSmtp] = useState(false);
-  const [smtpTestResult, setSmtpTestResult] = useState<any>(null);
+  const toast = useToast();
 
   useEffect(() => {
     loadSettings();
@@ -83,7 +78,6 @@ export default function SettingsPage() {
 
   const handleSave = async () => {
     setSaving(true);
-    setMessage(null);
     try {
       // Only send settings-relevant fields, not the whole user object
       const payload = {
@@ -104,12 +98,12 @@ export default function SettingsPage() {
       });
       const data = await res.json();
       if (data.success) {
-        setMessage({ type: "success", text: "Settings saved successfully" });
+        toast.success("Settings saved successfully");
       } else {
-        setMessage({ type: "error", text: data.error || "Failed to save" });
+        toast.error(data.error || "Failed to save");
       }
     } catch (e) {
-      setMessage({ type: "error", text: "Failed to save settings" });
+      toast.error("Failed to save settings");
     } finally {
       setSaving(false);
     }
@@ -117,11 +111,10 @@ export default function SettingsPage() {
 
   const handleChangePassword = async () => {
     if (passwordForm.newPassword !== passwordForm.confirmPassword) {
-      setMessage({ type: "error", text: "Passwords do not match" });
+      toast.error("Passwords do not match");
       return;
     }
     setSaving(true);
-    setMessage(null);
     try {
       const res = await fetch("/api/settings", {
         method: "PUT",
@@ -133,20 +126,17 @@ export default function SettingsPage() {
       });
       const data = await res.json();
       if (data.success) {
-        setMessage({ type: "success", text: "Password changed successfully" });
+        toast.success("Password changed successfully");
         setPasswordForm({
           currentPassword: "",
           newPassword: "",
           confirmPassword: "",
         });
       } else {
-        setMessage({
-          type: "error",
-          text: data.error || "Failed to change password",
-        });
+        toast.error(data.error || "Failed to change password");
       }
     } catch (e) {
-      setMessage({ type: "error", text: "Failed to change password" });
+      toast.error("Failed to change password");
     } finally {
       setSaving(false);
     }
@@ -154,11 +144,10 @@ export default function SettingsPage() {
 
   const handleUpdateMailPassword = async () => {
     if (!mailPasswordInput.trim()) {
-      setMessage({ type: "error", text: "Please enter your mail password" });
+      toast.error("Please enter your mail password");
       return;
     }
     setSavingMailPassword(true);
-    setMessage(null);
     try {
       const res = await fetch("/api/settings", {
         method: "PUT",
@@ -167,48 +156,15 @@ export default function SettingsPage() {
       });
       const data = await res.json();
       if (data.success) {
-        setMessage({
-          type: "success",
-          text: data.message || "Mail password updated successfully!",
-        });
+        toast.success(data.message || "Mail password updated!");
         setMailPasswordInput("");
       } else {
-        setMessage({
-          type: "error",
-          text: data.error || "Failed to update mail password",
-        });
+        toast.error(data.error || "Failed to update mail password");
       }
     } catch {
-      setMessage({ type: "error", text: "Failed to update mail password" });
+      toast.error("Failed to update mail password");
     } finally {
       setSavingMailPassword(false);
-    }
-  };
-
-  const handleTestSmtp = async () => {
-    setTestingSmtp(true);
-    setSmtpTestResult(null);
-    setMessage(null);
-    try {
-      const res = await fetch("/api/test-smtp");
-      const data = await res.json();
-      setSmtpTestResult(data);
-      if (data.success) {
-        setMessage({
-          type: "success",
-          text: "SMTP connection and authentication successful!",
-        });
-      } else {
-        const failedStep = data.steps?.find((s: any) => s.status === "fail");
-        setMessage({
-          type: "error",
-          text: failedStep?.detail || "SMTP test failed. See details below.",
-        });
-      }
-    } catch {
-      setMessage({ type: "error", text: "Failed to run SMTP test" });
-    } finally {
-      setTestingSmtp(false);
     }
   };
 
@@ -240,20 +196,6 @@ export default function SettingsPage() {
       {/* Settings Content */}
       <div className="flex-1 overflow-y-auto custom-scrollbar p-8">
         <div className="max-w-2xl">
-          {/* Message */}
-          {message && (
-            <div
-              className={cn(
-                "mb-6 p-3 rounded-lg text-sm animate-fade-in border",
-                message.type === "success"
-                  ? "bg-green-500/10 border-green-500/20 text-green-400"
-                  : "bg-red-500/10 border-red-500/20 text-red-400",
-              )}
-            >
-              {message.text}
-            </div>
-          )}
-
           {/* Profile Section */}
           {activeSection === "profile" && settings && (
             <div className="space-y-6 animate-fade-in">
@@ -679,54 +621,16 @@ export default function SettingsPage() {
             </div>
           )}
 
-          {/* Server Section */}
-          {activeSection === "server" && settings && (
+          {/* Mail Account Section */}
+          {activeSection === "account" && settings && (
             <div className="space-y-6 animate-fade-in">
               <div>
                 <h2 className="text-xl font-semibold text-white mb-1">
-                  Server Configuration
+                  Mail Account
                 </h2>
                 <p className="text-sm text-scalara-muted">
-                  Your mail server details (read-only)
+                  Update your mail server password if needed
                 </p>
-              </div>
-
-              <div className="p-6 rounded-xl bg-scalara-surface border border-scalara-border space-y-4">
-                <h3 className="text-sm font-semibold text-white mb-2">
-                  IMAP (Incoming)
-                </h3>
-                <div className="grid grid-cols-2 gap-4">
-                  <Input
-                    label="Host"
-                    value={settings.imapHost}
-                    disabled
-                    icon={<Server className="h-4 w-4" />}
-                  />
-                  <Input
-                    label="Port"
-                    value={String(settings.imapPort)}
-                    disabled
-                  />
-                </div>
-              </div>
-
-              <div className="p-6 rounded-xl bg-scalara-surface border border-scalara-border space-y-4">
-                <h3 className="text-sm font-semibold text-white mb-2">
-                  SMTP (Outgoing)
-                </h3>
-                <div className="grid grid-cols-2 gap-4">
-                  <Input
-                    label="Host"
-                    value={settings.smtpHost}
-                    disabled
-                    icon={<Server className="h-4 w-4" />}
-                  />
-                  <Input
-                    label="Port"
-                    value={String(settings.smtpPort)}
-                    disabled
-                  />
-                </div>
               </div>
 
               {/* Mail Password Update */}
@@ -770,69 +674,6 @@ export default function SettingsPage() {
                     Update
                   </Button>
                 </div>
-              </div>
-
-              {/* Test SMTP Connection */}
-              <div className="p-6 rounded-xl bg-scalara-surface border border-scalara-border space-y-4">
-                <h3 className="text-sm font-semibold text-white mb-1 flex items-center gap-2">
-                  <Server className="h-4 w-4" /> Test SMTP Connection
-                </h3>
-                <p className="text-xs text-scalara-muted">
-                  Run a step-by-step SMTP diagnostic to check if email sending
-                  is properly configured.
-                </p>
-                <Button
-                  onClick={handleTestSmtp}
-                  loading={testingSmtp}
-                  variant="secondary"
-                >
-                  {testingSmtp ? "Testing..." : "Run SMTP Test"}
-                </Button>
-
-                {smtpTestResult && (
-                  <div className="space-y-2 mt-3">
-                    {smtpTestResult.steps?.map((step: any, i: number) => (
-                      <div
-                        key={i}
-                        className={`flex items-start gap-2 text-xs p-2 rounded-lg ${
-                          step.status === "pass"
-                            ? "bg-green-500/10 text-green-400"
-                            : step.status === "fail"
-                              ? "bg-red-500/10 text-red-400"
-                              : "bg-yellow-500/10 text-yellow-400"
-                        }`}
-                      >
-                        <span className="mt-0.5">
-                          {step.status === "pass"
-                            ? "✅"
-                            : step.status === "fail"
-                              ? "❌"
-                              : "⏭️"}
-                        </span>
-                        <div>
-                          <span className="font-medium">{step.name}</span>
-                          {step.detail && (
-                            <p className="text-[10px] opacity-80 mt-0.5">
-                              {step.detail}
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-
-                    {smtpTestResult.fixCommands &&
-                      smtpTestResult.fixCommands.length > 0 && (
-                        <div className="mt-3 p-3 rounded-lg bg-scalara-card border border-scalara-border">
-                          <p className="text-xs font-semibold text-yellow-400 mb-2">
-                            🔧 VPS Fix Commands (run via SSH as root):
-                          </p>
-                          <pre className="text-[10px] text-scalara-muted whitespace-pre-wrap break-all font-mono bg-black/40 p-2 rounded">
-                            {smtpTestResult.fixCommands.join("\n\n")}
-                          </pre>
-                        </div>
-                      )}
-                  </div>
-                )}
               </div>
 
               <div className="p-4 rounded-xl bg-scalara-card border border-scalara-border">

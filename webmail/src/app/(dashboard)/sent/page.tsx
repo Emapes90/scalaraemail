@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { useMailStore } from "@/store/useMailStore";
+import { useToast } from "@/components/ui/Toast";
 import { EmailList } from "@/components/email/EmailList";
 import { EmailView } from "@/components/email/EmailView";
 import { EmailToolbar } from "@/components/email/EmailToolbar";
@@ -18,29 +19,46 @@ export default function SentPage() {
     setActiveFolder,
     setComposing,
     removeEmails,
+    selectedEmails,
+    clearSelection,
+    updateEmail,
     isLoading,
     setLoading,
     searchQuery,
   } = useMailStore();
+
+  const toast = useToast();
   const [viewingEmail, setViewingEmail] = useState<Email | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const loadEmails = useCallback(
+    async (silent = false) => {
+      if (!silent) setLoading(true);
+      else setRefreshing(true);
+      try {
+        const res = await fetch("/api/emails?folder=sent&page=1&pageSize=50");
+        const data = await res.json();
+        if (data.success) setEmails(data.data.emails);
+      } catch {
+        if (!silent) toast.error("Failed to load sent emails");
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    },
+    [setEmails, setLoading, toast],
+  );
 
   useEffect(() => {
     setActiveFolder("sent");
     loadEmails();
   }, []);
 
-  const loadEmails = async () => {
-    setLoading(true);
-    try {
-      const res = await fetch("/api/emails?folder=sent&page=1&pageSize=50");
-      const data = await res.json();
-      if (data.success) setEmails(data.data.emails);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoading(false);
-    }
-  };
+  useEffect(() => {
+    const handler = () => loadEmails(true);
+    window.addEventListener("scalara:refresh-emails", handler);
+    return () => window.removeEventListener("scalara:refresh-emails", handler);
+  }, [loadEmails]);
 
   const handleEmailClick = async (email: Email) => {
     setViewingEmail(email);
@@ -49,8 +67,8 @@ export default function SentPage() {
       const res = await fetch(`/api/emails/${email.uid}?folder=sent`);
       const data = await res.json();
       if (data.success) setViewingEmail({ ...email, ...data.data });
-    } catch (e) {
-      console.error(e);
+    } catch {
+      toast.error("Failed to load email");
     }
   };
 
@@ -59,31 +77,71 @@ export default function SentPage() {
     setActiveEmail(null);
   };
 
-  const handleAction = async (action: string) => {
-    const uid = viewingEmail?.uid;
-    if (!uid) return;
+  const handleAction = async (action: string, emailId?: string) => {
+    const targets = emailId
+      ? [emailId]
+      : viewingEmail
+        ? [String(viewingEmail.uid)]
+        : Array.from(selectedEmails);
+
+    if (targets.length === 0) {
+      toast.warning("No emails selected");
+      return;
+    }
+
     try {
-      await fetch(`/api/emails/${uid}`, {
+      await Promise.all(
+        targets.map((uid) =>
+          fetch(`/api/emails/${uid}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action, folder: "sent" }),
+          }),
+        ),
+      );
+
+      if (["trash", "archive", "spam"].includes(action)) {
+        removeEmails(targets);
+        if (viewingEmail) handleBack();
+        clearSelection();
+        const label =
+          action === "trash"
+            ? "Deleted"
+            : action === "archive"
+              ? "Archived"
+              : "Marked as spam";
+        toast.success(
+          `${label} ${targets.length > 1 ? targets.length + " emails" : "email"}`,
+        );
+      }
+
+      if (action === "star") {
+        targets.forEach((uid) => updateEmail(uid, { isStarred: true }));
+        toast.success("Starred");
+      }
+      if (action === "unstar") {
+        targets.forEach((uid) => updateEmail(uid, { isStarred: false }));
+        toast.success("Unstarred");
+      }
+    } catch {
+      toast.error(`Failed to ${action}`);
+    }
+  };
+
+  const handleStarToggle = async (email: Email) => {
+    const action = email.isStarred ? "unstar" : "star";
+    updateEmail(email.id, { isStarred: !email.isStarred });
+    try {
+      await fetch(`/api/emails/${email.uid}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action, folder: "sent" }),
       });
-      if (["trash", "archive", "spam"].includes(action)) {
-        removeEmails([String(uid)]);
-        handleBack();
-      }
-    } catch (e) {
-      console.error(e);
+    } catch {
+      updateEmail(email.id, { isStarred: email.isStarred });
+      toast.error("Failed to update star");
     }
   };
-
-  const filteredEmails = searchQuery
-    ? emails.filter(
-        (e) =>
-          e.subject?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          e.fromAddress.toLowerCase().includes(searchQuery.toLowerCase()),
-      )
-    : emails;
 
   const handleReply = () => {
     if (!viewingEmail) return;
@@ -126,7 +184,16 @@ export default function SentPage() {
     });
   };
 
+  const filteredEmails = searchQuery
+    ? emails.filter(
+        (e) =>
+          e.subject?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          e.fromAddress.toLowerCase().includes(searchQuery.toLowerCase()),
+      )
+    : emails;
+
   if (isLoading) return <PageLoader />;
+
   if (viewingEmail)
     return (
       <EmailView
@@ -146,6 +213,8 @@ export default function SentPage() {
   return (
     <div className="flex flex-col h-full">
       <EmailToolbar
+        onRefresh={() => loadEmails(true)}
+        refreshing={refreshing}
         onMarkRead={() => {}}
         onMarkUnread={() => {}}
         onDelete={() => handleAction("trash")}
@@ -160,7 +229,11 @@ export default function SentPage() {
           description="Messages you send will appear here."
         />
       ) : (
-        <EmailList emails={filteredEmails} onEmailClick={handleEmailClick} />
+        <EmailList
+          emails={filteredEmails}
+          onEmailClick={handleEmailClick}
+          onStarToggle={handleStarToggle}
+        />
       )}
     </div>
   );

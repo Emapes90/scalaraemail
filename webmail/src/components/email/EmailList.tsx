@@ -10,9 +10,14 @@ import type { Email } from "@/types";
 interface EmailListProps {
   emails: Email[];
   onEmailClick: (email: Email) => void;
+  onStarToggle?: (email: Email) => void;
 }
 
-export function EmailList({ emails, onEmailClick }: EmailListProps) {
+export function EmailList({
+  emails,
+  onEmailClick,
+  onStarToggle,
+}: EmailListProps) {
   const { selectedEmails, toggleSelectEmail, activeEmail } = useMailStore();
 
   if (emails.length === 0) return null;
@@ -54,7 +59,7 @@ export function EmailList({ emails, onEmailClick }: EmailListProps) {
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                // Toggle star handled by parent
+                onStarToggle?.(email);
               }}
               className="shrink-0"
             >

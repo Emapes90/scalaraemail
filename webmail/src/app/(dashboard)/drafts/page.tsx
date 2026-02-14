@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { useMailStore } from "@/store/useMailStore";
+import { useToast } from "@/components/ui/Toast";
 import { EmailList } from "@/components/email/EmailList";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { PageLoader } from "@/components/ui/Loader";
@@ -20,31 +21,29 @@ export default function DraftsPage() {
     searchQuery,
   } = useMailStore();
 
+  const toast = useToast();
+
+  const loadEmails = useCallback(
+    async (silent = false) => {
+      if (!silent) setLoading(true);
+      try {
+        const res = await fetch("/api/emails?folder=drafts&page=1&pageSize=50");
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.success) setEmails(data.data.emails);
+      } catch {
+        if (!silent) toast.error("Failed to load drafts");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [setEmails, setLoading, toast],
+  );
+
   useEffect(() => {
     setActiveFolder("drafts");
     loadEmails();
   }, []);
-
-  const loadEmails = async () => {
-    setLoading(true);
-    try {
-      const res = await fetch("/api/emails?folder=drafts&page=1&pageSize=50");
-      if (!res.ok) {
-        console.error("Failed to load drafts:", res.status);
-        return;
-      }
-      const data = await res.json();
-      if (data.success) {
-        setEmails(data.data.emails);
-      } else {
-        console.error("Failed to load drafts:", data.error);
-      }
-    } catch (e) {
-      console.error("Failed to load drafts:", e);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleDraftClick = (email: Email) => {
     setComposing(true, {
@@ -54,6 +53,7 @@ export default function DraftsPage() {
       subject: email.subject || "",
       body: email.bodyText || "",
     });
+    toast.info("Draft loaded");
   };
 
   const filteredEmails = searchQuery
