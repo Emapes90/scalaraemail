@@ -808,16 +808,31 @@ EOF
     chown root:dovecot /etc/dovecot/users
     chmod 640 /etc/dovecot/users
 
-    cat > /etc/dovecot/conf.d/10-mail.conf << EOF
+    cat > /etc/dovecot/conf.d/10-mail.conf << 'EOF'
 mail_location = maildir:/var/mail/vhosts/%d/%n
 namespace inbox {
   inbox = yes
   separator = /
-  mailbox Drafts { auto = subscribe; special_use = \\Drafts }
-  mailbox Sent   { auto = subscribe; special_use = \\Sent }
-  mailbox Trash  { auto = subscribe; special_use = \\Trash }
-  mailbox Spam   { auto = subscribe; special_use = \\Junk }
-  mailbox Archive { auto = subscribe; special_use = \\Archive }
+  mailbox Drafts {
+    auto = subscribe
+    special_use = \Drafts
+  }
+  mailbox Sent {
+    auto = subscribe
+    special_use = \Sent
+  }
+  mailbox Trash {
+    auto = subscribe
+    special_use = \Trash
+  }
+  mailbox Spam {
+    auto = subscribe
+    special_use = \Junk
+  }
+  mailbox Archive {
+    auto = subscribe
+    special_use = \Archive
+  }
 }
 mail_uid = 5000
 mail_gid = 5000
