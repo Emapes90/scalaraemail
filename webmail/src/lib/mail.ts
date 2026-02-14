@@ -328,8 +328,19 @@ export async function sendEmail(
   let password: string;
   try {
     password = decrypt(config.encryptedPassword);
-  } catch {
-    throw new Error("Failed to decrypt mail password.");
+    if (!password || password.length === 0) {
+      throw new Error("Decrypted password is empty");
+    }
+  } catch (err: any) {
+    console.error(
+      "SMTP decrypt failed for",
+      config.email,
+      "—",
+      err?.message || err,
+    );
+    throw new Error(
+      "Failed to decrypt mail password. Go to Settings → Server and re-enter your mail password.",
+    );
   }
 
   const transporter = nodemailer.createTransport({
@@ -368,14 +379,22 @@ export async function sendEmail(
     return { messageId: info.messageId, accepted: info.accepted };
   } catch (err: any) {
     const msg = err?.message || String(err);
+    console.error(
+      `SMTP send failed: ${msg} | host=${config.smtpHost}:${config.smtpPort} user=${config.email}`,
+    );
     if (msg.includes("EAUTH") || msg.includes("Invalid login")) {
       throw new Error(
-        "SMTP authentication failed. Check your mail credentials.",
+        "SMTP authentication failed. Go to Settings → Server and re-enter your mail password.",
       );
     }
     if (msg.includes("ECONNREFUSED") || msg.includes("ETIMEDOUT")) {
       throw new Error(
-        `Cannot connect to SMTP server ${config.smtpHost}:${config.smtpPort}.`,
+        `Cannot connect to SMTP server ${config.smtpHost}:${config.smtpPort}. Check that the server is running.`,
+      );
+    }
+    if (msg.includes("ESOCKET") || msg.includes("ECONNRESET")) {
+      throw new Error(
+        `Connection to ${config.smtpHost}:${config.smtpPort} was reset. Try again or check TLS settings.`,
       );
     }
     throw new Error(`Failed to send email: ${msg}`);

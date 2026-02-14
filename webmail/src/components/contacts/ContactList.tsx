@@ -28,6 +28,7 @@ import {
   Calendar,
 } from "lucide-react";
 import type { Contact, ContactGroup } from "@/types";
+import { useMailStore } from "@/store/useMailStore";
 
 interface ContactListProps {
   contacts: Contact[];
@@ -50,6 +51,8 @@ export function ContactList({
 }: ContactListProps) {
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [editingContact, setEditingContact] = useState<Contact | null>(null);
+  const { setComposing } = useMailStore();
   const [searchQuery, setSearchQuery] = useState("");
   const [activeGroup, setActiveGroup] = useState<string | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
@@ -78,7 +81,10 @@ export function ContactList({
       c.company?.toLowerCase().includes(searchQuery.toLowerCase());
 
     const matchesGroup =
-      !activeGroup || c.groups?.some((g) => g.id === activeGroup);
+      !activeGroup ||
+      (activeGroup === "favorites"
+        ? c.isFavorite
+        : c.groups?.some((g) => g.id === activeGroup));
 
     return matchesSearch && matchesGroup;
   });
@@ -104,7 +110,7 @@ export function ContactList({
 
     setIsCreating(true);
     try {
-      const result = await onCreateContact({
+      const payload: any = {
         firstName: contactForm.firstName || null,
         lastName: contactForm.lastName || null,
         displayName,
@@ -119,10 +125,21 @@ export function ContactList({
         website: contactForm.website || null,
         address: contactForm.address || null,
         notes: contactForm.notes || null,
-      });
+      };
+
+      let result;
+      if (editingContact) {
+        result = await onUpdateContact({
+          id: editingContact.id,
+          ...payload,
+        });
+      } else {
+        result = await onCreateContact(payload);
+      }
 
       if (result.success) {
         setShowCreateModal(false);
+        setEditingContact(null);
         setContactForm({
           firstName: "",
           lastName: "",
@@ -135,14 +152,35 @@ export function ContactList({
           address: "",
           notes: "",
         });
+        if (editingContact) {
+          setSelectedContact(null);
+        }
       } else {
-        setCreateError(result.error || "Failed to create contact");
+        setCreateError(result.error || "Failed to save contact");
       }
     } catch {
       setCreateError("Unexpected error. Please try again.");
     } finally {
       setIsCreating(false);
     }
+  };
+
+  const handleEditContact = (contact: Contact) => {
+    setEditingContact(contact);
+    setContactForm({
+      firstName: contact.firstName || "",
+      lastName: contact.lastName || "",
+      displayName: contact.displayName || "",
+      email: contact.emails[0]?.email || "",
+      phone: contact.phones[0]?.phone || "",
+      company: contact.company || "",
+      jobTitle: contact.jobTitle || "",
+      website: contact.website || "",
+      address: contact.address || "",
+      notes: contact.notes || "",
+    });
+    setCreateError(null);
+    setShowCreateModal(true);
   };
 
   return (
@@ -327,7 +365,11 @@ export function ContactList({
                   </div>
                 </div>
                 <div className="flex items-center gap-1">
-                  <Button variant="ghost" size="icon">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => handleEditContact(selectedContact)}
+                  >
                     <Edit3 className="h-4 w-4" />
                   </Button>
                   <Dropdown
@@ -340,7 +382,20 @@ export function ContactList({
                       {
                         label: "Send Email",
                         icon: <Mail className="h-4 w-4" />,
-                        onClick: () => {},
+                        onClick: () => {
+                          const email = selectedContact.emails[0]?.email;
+                          if (email) {
+                            setComposing(true, {
+                              to: [email],
+                              cc: [],
+                              bcc: [],
+                              subject: "",
+                              body: "",
+                              attachments: [],
+                              isHtml: false,
+                            });
+                          }
+                        },
                       },
                       {
                         label: "Delete Contact",
@@ -481,11 +536,14 @@ export function ContactList({
         )}
       </div>
 
-      {/* Create Contact Modal */}
+      {/* Create/Edit Contact Modal */}
       <Modal
         isOpen={showCreateModal}
-        onClose={() => setShowCreateModal(false)}
-        title="New Contact"
+        onClose={() => {
+          setShowCreateModal(false);
+          setEditingContact(null);
+        }}
+        title={editingContact ? "Edit Contact" : "New Contact"}
         size="md"
       >
         <div className="space-y-4">
@@ -561,6 +619,15 @@ export function ContactList({
             }
             icon={<Globe className="h-4 w-4" />}
           />
+          <Input
+            label="Address"
+            placeholder="Street, City, Country"
+            value={contactForm.address}
+            onChange={(e) =>
+              setContactForm({ ...contactForm, address: e.target.value })
+            }
+            icon={<MapPin className="h-4 w-4" />}
+          />
           <Textarea
             label="Notes"
             placeholder="Add notes..."
@@ -575,13 +642,14 @@ export function ContactList({
               variant="ghost"
               onClick={() => {
                 setShowCreateModal(false);
+                setEditingContact(null);
                 setCreateError(null);
               }}
             >
               Cancel
             </Button>
             <Button onClick={handleCreate} loading={isCreating}>
-              Create Contact
+              {editingContact ? "Save Changes" : "Create Contact"}
             </Button>
           </div>
         </div>

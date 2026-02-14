@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { hashPassword, verifyPassword } from "@/lib/crypto";
+import { hashPassword, verifyPassword, encrypt } from "@/lib/crypto";
 import { z } from "zod";
 
 const updateSettingsSchema = z.object({
@@ -103,6 +103,39 @@ export async function PUT(request: NextRequest) {
       });
 
       return NextResponse.json({ success: true, message: "Password updated" });
+    }
+
+    // Handle mail password update (re-encrypt with current ENCRYPTION_KEY)
+    if (body.mailPassword && typeof body.mailPassword === "string") {
+      const mailPass = body.mailPassword.trim();
+      if (mailPass.length < 1) {
+        return NextResponse.json(
+          { success: false, error: "Mail password cannot be empty" },
+          { status: 400 },
+        );
+      }
+
+      try {
+        const encrypted = encrypt(mailPass);
+        await prisma.user.update({
+          where: { email: session.user.email },
+          data: { mailPassword: encrypted },
+        });
+        return NextResponse.json({
+          success: true,
+          message: "Mail password updated. Try sending an email now.",
+        });
+      } catch (err: any) {
+        console.error("Mail password encrypt error:", err);
+        return NextResponse.json(
+          {
+            success: false,
+            error:
+              "Failed to encrypt mail password. Check ENCRYPTION_KEY configuration.",
+          },
+          { status: 500 },
+        );
+      }
     }
 
     // Handle settings update — strip non-settings fields before validation

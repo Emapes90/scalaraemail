@@ -59,6 +59,9 @@ export default function SettingsPage() {
     type: "success" | "error";
     text: string;
   } | null>(null);
+  const [mailPasswordInput, setMailPasswordInput] = useState("");
+  const [showMailPassword, setShowMailPassword] = useState(false);
+  const [savingMailPassword, setSavingMailPassword] = useState(false);
 
   useEffect(() => {
     loadSettings();
@@ -144,6 +147,39 @@ export default function SettingsPage() {
       setMessage({ type: "error", text: "Failed to change password" });
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleUpdateMailPassword = async () => {
+    if (!mailPasswordInput.trim()) {
+      setMessage({ type: "error", text: "Please enter your mail password" });
+      return;
+    }
+    setSavingMailPassword(true);
+    setMessage(null);
+    try {
+      const res = await fetch("/api/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mailPassword: mailPasswordInput }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setMessage({
+          type: "success",
+          text: data.message || "Mail password updated successfully!",
+        });
+        setMailPasswordInput("");
+      } else {
+        setMessage({
+          type: "error",
+          text: data.error || "Failed to update mail password",
+        });
+      }
+    } catch {
+      setMessage({ type: "error", text: "Failed to update mail password" });
+    } finally {
+      setSavingMailPassword(false);
     }
   };
 
@@ -355,6 +391,11 @@ export default function SettingsPage() {
                 >
                   Update Password
                 </Button>
+                <p className="text-xs text-scalara-muted mt-2">
+                  This changes your webmail login only. To update your SMTP/IMAP
+                  password, ask your admin to run the password change on the
+                  server, then re-enter it in Settings → Server → Mail Password.
+                </p>
               </div>
 
               <div className="p-6 rounded-xl bg-scalara-surface border border-scalara-border">
@@ -656,6 +697,49 @@ export default function SettingsPage() {
                     value={String(settings.smtpPort)}
                     disabled
                   />
+                </div>
+              </div>
+
+              {/* Mail Password Update */}
+              <div className="p-6 rounded-xl bg-scalara-surface border border-scalara-border space-y-4">
+                <h3 className="text-sm font-semibold text-white mb-1 flex items-center gap-2">
+                  <Key className="h-4 w-4" /> Mail Server Password
+                </h3>
+                <p className="text-xs text-scalara-muted">
+                  If you&apos;re getting &quot;SMTP authentication failed&quot;,
+                  re-enter the same password that was used when your email
+                  account was created by the admin.
+                </p>
+                <div className="flex gap-3 items-end">
+                  <div className="flex-1">
+                    <Input
+                      label="Mail Password"
+                      type={showMailPassword ? "text" : "password"}
+                      value={mailPasswordInput}
+                      onChange={(e) => setMailPasswordInput(e.target.value)}
+                      placeholder="Enter your mail server password"
+                      iconRight={
+                        <button
+                          onClick={() => setShowMailPassword(!showMailPassword)}
+                          className="hover:text-white transition-colors"
+                        >
+                          {showMailPassword ? (
+                            <EyeOff className="h-4 w-4" />
+                          ) : (
+                            <Eye className="h-4 w-4" />
+                          )}
+                        </button>
+                      }
+                    />
+                  </div>
+                  <Button
+                    onClick={handleUpdateMailPassword}
+                    loading={savingMailPassword}
+                    variant="secondary"
+                    icon={<Save className="h-4 w-4" />}
+                  >
+                    Update
+                  </Button>
                 </div>
               </div>
 
